@@ -33,6 +33,7 @@ function normalizeBalance(val) {
 export const deepseekProvider = {
     id: 'deepseek',
     label: 'DeepSeek',
+    logoFile: 'deepseek-symbolic.svg',
 
     needsAuth(settings) {
         return !!(settings.get_string('deepseek-api-key'));

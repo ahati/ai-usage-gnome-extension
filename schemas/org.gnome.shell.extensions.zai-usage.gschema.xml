@@ -24,6 +24,19 @@
       <description>Whether to show the usage percentage next to the icon in the top panel.</description>
     </key>
 
+    <key name="show-logos" type="b">
+      <default>true</default>
+      <summary>Show provider logos</summary>
+      <description>Whether to show provider logos on the provider tabs in the popup menu.</description>
+    </key>
+
+    <key name="display-mode" type="s">
+      <choices><choice value='used'/><choice value='remaining'/></choices>
+      <default>'used'</default>
+      <summary>Display mode</summary>
+      <description>Whether the indicator and progress bars reflect "used" or "remaining" quota.</description>
+    </key>
+
     <key name="high-usage-threshold" type="i">
       <default>80</default>
       <range min="50" max="100"/>

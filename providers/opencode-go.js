@@ -1,11 +1,11 @@
 /* OpenCode Go provider
  *
- * Uses the _server SSR API endpoint:
- *   GET https://opencode.ai/workspace/{id}/go  → extract _server hash
- *   GET https://opencode.ai/_server?id={hash}&args={...}
+ * Loads the SSR-rendered dashboard page:
+ *   GET https://opencode.ai/workspace/{id}/go
  *
- * Response contains rollingUsage, weeklyUsage, monthlyUsage with
- * usagePercent (0-100) and resetInSec.
+ * The page inlines the usage data in a SolidJS hydration stream
+ * (rollingUsage:$R[..]={usagePercent,resetInSec} etc.), which we parse
+ * directly — no separate _server call is needed.
  */
 
 import Soup from 'gi://Soup?version=3.0';
@@ -21,6 +21,8 @@ function clampPercent(val) {
 export const opencodeGoProvider = {
     id: 'opencode-go',
     label: 'OpenCode Go',
+    logoFile: 'opencode-logo.svg',
+    fullColorLogo: true,
 
     needsAuth(settings) {
         const wid = settings.get_string('opencode-go-workspace-id');
@@ -36,7 +38,9 @@ export const opencodeGoProvider = {
             return { attempted: false };
 
         try {
-            // Step 1: load the /go page to extract the _server hash
+            // The /go dashboard page is server-side rendered with the usage
+            // data inlined (SolidJS hydration stream: rollingUsage:$R[..]=...
+            // and weekly/monthly equivalents). No separate _server call needed.
             const goUrl = `${BASE}/workspace/${encodeURIComponent(workspaceId)}/go`;
             const goHtml = await this._get(session, goUrl, authCookie);
 
@@ -50,28 +54,7 @@ export const opencodeGoProvider = {
                     errors: ['OpenCode Go: auth cookie expired. Re-authenticate and update in Preferences.'] };
             }
 
-            // Extract _server hash from the page
-            const hashMatch = goHtml.match(/_server\?id=([a-f0-9]{64})/);
-            if (!hashMatch) {
-                return { attempted: true, entries: [],
-                    errors: ['OpenCode Go: could not find _server hash in page'] };
-            }
-            const serverHash = hashMatch[1];
-
-            // Step 2: call _server endpoint with workspace ID
-            const args = JSON.stringify({
-                t: { t: 9, i: 0, l: 1, a: [{ t: 1, s: workspaceId }], o: 0 },
-                f: 31, m: [],
-            });
-            const serverUrl = `${BASE}/_server?id=${serverHash}&args=${encodeURIComponent(args)}`;
-
-            const ssrBody = await this._get(session, serverUrl, authCookie);
-            if (!ssrBody) {
-                return { attempted: true, entries: [],
-                    errors: ['OpenCode Go: empty response from _server'] };
-            }
-
-            return this._parseSSR(ssrBody);
+            return this._parseSSR(goHtml);
         } catch (e) {
             return { attempted: true, entries: [],
                 errors: [`OpenCode Go: ${e.message || e}`] };

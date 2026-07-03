@@ -31,6 +31,7 @@ function getAuthHeaders(settings) {
 export const openaiProvider = {
     id: 'openai',
     label: 'OpenAI',
+    logoFile: 'codex-symbolic.svg',
 
     needsAuth(settings) {
         return !!(settings.get_string('openai-oauth-token'));

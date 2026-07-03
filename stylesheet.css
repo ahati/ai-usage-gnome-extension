@@ -2,28 +2,125 @@
 
 /* ── Panel ── */
 
-.codexbar-panel-box {
-    spacing: 4px;
-    padding: 0 3px;
+.codexbar-panel-icon {
+    icon-size: 16px;
+    -st-icon-style: symbolic;
 }
 
-.codexbar-app-icon {
-    padding: 0;
+/* ── Popup ── */
+
+.codexbar-popup {
+    min-width: 320px;
 }
 
-/* ── Menu ── */
-
+/* Header row */
 .codexbar-header {
-    font-weight: bold;
-    font-size: 12px;
-    padding: 2px 0;
-    color: #e2e8f0;
+    padding: 10px;
+    spacing: 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.codexbar-provider-header {
-    font-weight: 600;
-    font-size: 11px;
-    padding: 6px 0 2px 0;
-    color: #a1a1aa;
-    letter-spacing: 0.3px;
+.codexbar-header-title {
+    font-weight: bold;
+    font-size: 1.05em;
+    color: #eeeeee;
+}
+
+.codexbar-header-button {
+    padding: 4px;
+    border-radius: 4px;
+    margin-left: 5px;
+}
+
+.codexbar-header-button:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.codexbar-header-button-icon {
+    icon-size: 16px;
+}
+
+/* Provider tabs */
+.codexbar-tabs-container {
+    padding: 10px;
+    spacing: 5px;
+}
+
+.codexbar-tab {
+    padding: 5px 10px;
+    border-radius: 8px;
+    margin-right: 5px;
+}
+
+.codexbar-tab:hover {
+    background-color: rgba(255, 255, 255, 0.07);
+}
+
+.codexbar-tab-active {
+    background-color: rgba(255, 255, 255, 0.15);
+    font-weight: bold;
+}
+
+.codexbar-tab-icon {
+    margin-right: 6px;
+    icon-size: 16px;
+    color: white;
+    -st-icon-style: symbolic;
+}
+
+/* Full-color brand logos: keep original colors, don't force symbolic.
+   Self-contained (no -st-icon-style, no forced color) so fills render as-is. */
+.codexbar-tab-icon-color {
+    margin-right: 6px;
+    icon-size: 16px;
+}
+
+/* Usage content */
+.codexbar-usage-section {
+    padding: 12px 15px 15px 15px;
+    spacing: 4px;
+}
+
+.codexbar-usage-title {
+    font-size: 0.9em;
+    font-weight: bold;
+    margin-bottom: 5px;
+    color: #eeeeee;
+}
+
+.codexbar-usage-subtitle {
+    font-size: 0.8em;
+    color: #aaaaaa;
+    margin-bottom: 8px;
+}
+
+.codexbar-usage-subtitle-right {
+    text-align: right;
+}
+
+.codexbar-hint {
+    color: #8a8a8a;
+    font-style: italic;
+}
+
+/* Progress bars: full-width track split into free (left, colored) + used (right, gray) */
+.codexbar-progress-container {
+    height: 6px;
+    width: 290px;
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    margin-bottom: 6px;
+    overflow: hidden;
+}
+
+/* Free/remaining quota — left segment, colored by usage severity (inline) */
+.codexbar-progress-free {
+    height: 6px;
+    background-color: #2ec27e; /* green; overridden inline */
+}
+
+/* Used quota — right segment, gray, fills the rest of the track */
+.codexbar-progress-used {
+    height: 6px;
+    background-color: rgba(255, 255, 255, 0.25);
 }

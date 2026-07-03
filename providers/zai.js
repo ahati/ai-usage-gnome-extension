@@ -42,6 +42,8 @@ function getAuthHeaders(settings) {
 export const zaiProvider = {
     id: 'zai',
     label: 'Z.AI',
+    logoFile: 'zai-logo.svg',
+    fullColorLogo: true,
 
     needsAuth(settings) {
         const hasApiKey = !!(settings.get_string('zai-api-key'));
