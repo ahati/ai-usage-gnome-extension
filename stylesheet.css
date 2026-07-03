@@ -103,24 +103,8 @@
     font-style: italic;
 }
 
-/* Progress bars: full-width track split into free (left, colored) + used (right, gray) */
-.ai-usage-progress-container {
-    height: 6px;
-    width: 290px;
-    background-color: rgba(255, 255, 255, 0.1);
-    border-radius: 3px;
-    margin-bottom: 6px;
-    overflow: hidden;
-}
-
-/* Free/remaining quota — left segment, colored by usage severity (inline) */
-.ai-usage-progress-free {
-    height: 6px;
-    background-color: #2ec27e; /* green; overridden inline */
-}
-
-/* Used quota — right segment, gray, fills the rest of the track */
-.ai-usage-progress-used {
-    height: 6px;
-    background-color: rgba(255, 255, 255, 0.25);
+/* Progress bar: St.DrawingArea painted via Cairo */
+.ai-usage-progress-bar {
+    height: 16px;
+    margin-bottom: 8px;
 }

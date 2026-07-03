@@ -38,6 +38,15 @@ const BAR_WIDTH = 290;        // popup progress bar track width
 
 function clamp(v) { return Math.max(0, Math.min(100, v)); }
 
+/* Parse #RRGGBB into [r, g, b, a] (0–1 floats) for Cairo. */
+function _hexToRgba(hex) {
+    const h = hex.replace('#', '');
+    const r = parseInt(h.substring(0, 2), 16) / 255;
+    const g = parseInt(h.substring(2, 4), 16) / 255;
+    const b = parseInt(h.substring(4, 6), 16) / 255;
+    return [r, g, b, 1.0];
+}
+
 function fmtNum(n) {
     if (n === null || n === undefined) return null;
     if (typeof n === 'number') {
@@ -286,27 +295,56 @@ const Indicator = GObject.registerClass(
                 const pctRemaining = clamp(100 - pctUsed);
                 this._addTitle(parent, e.label || 'Usage');
 
-                const freeColor = usageColor(this._displayedValue(pctUsed, pctRemaining), this._settings);
-                const track = new St.BoxLayout({
-                    style_class: 'ai-usage-progress-container',
+                // Progress bar drawn with Cairo via St.DrawingArea.
+                // This is the same technique GNOME Shell's own Slider uses —
+                // we paint directly at render time using the widget's actual
+                // allocated width, so proportions are always pixel-perfect
+                // regardless of CSS layout quirks.
+                const fillColor = usageColor(pctUsed, this._settings);
+                const fraction = pctRemaining / 100; // 1.0 = full, 0 = empty
+
+                const bar = new St.DrawingArea({
+                    style_class: 'ai-usage-progress-bar',
+                    x_expand: true,
                 });
-                if (pctRemaining > 0) {
-                    track.add_child(new St.Widget({
-                        style_class: 'ai-usage-progress-free',
-                        // When there's no used segment, expand to fill the track;
-                        // otherwise use a fixed width so the used segment gets the rest.
-                        x_expand: pctUsed === 0,
-                        width: pctUsed === 0 ? -1 : Math.round((pctRemaining / 100) * BAR_WIDTH),
-                        style: `background-color: ${freeColor};`,
-                    }));
-                }
-                if (pctUsed > 0) {
-                    track.add_child(new St.Widget({
-                        style_class: 'ai-usage-progress-used',
-                        x_expand: true,
-                    }));
-                }
-                parent.add_child(track);
+                bar.connect('repaint', area => {
+                    const cr = area.get_context();
+                    const w = area.width;
+                    const h = area.height;
+                    if (w <= 0 || h <= 0) { cr.$dispose(); return; }
+                    const radius = Math.min(h / 2, 6);
+
+                    // Translucent track background (rounded)
+                    cr.setSourceRGBA(1, 1, 1, 0.1);
+                    cr.newSubPath();
+                    cr.arc(w - radius, radius, radius, -Math.PI / 2, 0);
+                    cr.arc(w - radius, h - radius, radius, 0, Math.PI / 2);
+                    cr.arc(radius, h - radius, radius, Math.PI / 2, Math.PI);
+                    cr.arc(radius, radius, radius, Math.PI, 3 * Math.PI / 2);
+                    cr.closePath();
+                    cr.fill();
+
+                    // Colored fill (left-aligned, width = fraction of track, rounded)
+                    if (fraction > 0) {
+                        const fillW = Math.round(w * fraction);
+                        const rgba = _hexToRgba(fillColor);
+                        cr.setSourceRGBA(rgba[0], rgba[1], rgba[2], rgba[3]);
+                        // Clip to track shape so fill corners follow the track
+                        cr.save();
+                        cr.newSubPath();
+                        cr.arc(w - radius, radius, radius, -Math.PI / 2, 0);
+                        cr.arc(w - radius, h - radius, radius, 0, Math.PI / 2);
+                        cr.arc(radius, h - radius, radius, Math.PI / 2, Math.PI);
+                        cr.arc(radius, radius, radius, Math.PI, 3 * Math.PI / 2);
+                        cr.closePath();
+                        cr.clip();
+                        cr.rectangle(0, 0, fillW, h);
+                        cr.fill();
+                        cr.restore();
+                    }
+                    cr.$dispose();
+                });
+                parent.add_child(bar);
 
                 const stats = new St.BoxLayout({ x_expand: true });
                 const leftText = this._settings.get_string('display-mode') === 'remaining'
