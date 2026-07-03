@@ -15,11 +15,11 @@ function clampPercent(val) {
     return Math.max(0, Math.min(100, val));
 }
 
-function getAuthHeaders(settings) {
-    const oauthToken = settings.get_string('openai-oauth-token');
+function getAuthHeaders(credentials) {
+    const oauthToken = credentials.oauthToken;
     if (oauthToken && oauthToken.length > 0) {
         // Check expiry
-        const expiry = settings.get_int('openai-oauth-expiry');
+        const expiry = credentials.oauthExpiry || 0;
         if (expiry > 0 && expiry < Math.floor(Date.now() / 1000)) {
             return null; // expired
         }
@@ -33,12 +33,12 @@ export const openaiProvider = {
     label: 'OpenAI',
     logoFile: 'codex-symbolic.svg',
 
-    needsAuth(settings) {
-        return !!(settings.get_string('openai-oauth-token'));
+    needsAuth(credentials) {
+        return !!(credentials.oauthToken);
     },
 
-    async fetch(session, settings) {
-        const headers = getAuthHeaders(settings);
+    async fetch(session, credentials) {
+        const headers = getAuthHeaders(credentials);
         if (!headers) return { attempted: false };
 
         try {

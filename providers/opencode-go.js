@@ -24,15 +24,13 @@ export const opencodeGoProvider = {
     logoFile: 'opencode-logo.svg',
     fullColorLogo: true,
 
-    needsAuth(settings) {
-        const wid = settings.get_string('opencode-go-workspace-id');
-        const cookie = settings.get_string('opencode-go-auth-cookie');
-        return !!(wid && cookie);
+    needsAuth(credentials) {
+        return !!(credentials.workspaceId && credentials.authCookie);
     },
 
-    async fetch(session, settings) {
-        const workspaceId = settings.get_string('opencode-go-workspace-id');
-        const authCookie = settings.get_string('opencode-go-auth-cookie');
+    async fetch(session, credentials) {
+        const workspaceId = credentials.workspaceId;
+        const authCookie = credentials.authCookie;
 
         if (!workspaceId || !authCookie)
             return { attempted: false };

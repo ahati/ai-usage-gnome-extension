@@ -1,32 +1,35 @@
 /* Z.AI Usage Monitor - Preferences Dialog
  *
- * Multi-provider preferences with per-provider auth configuration.
- *
- * SPDX-License-Identifier: MIT
+ * Multi-account preferences. Account credentials are stored in a JSON
+ * config file (see config.js). General UI settings stay in gsettings.
  */
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
-import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
 import Adw from 'gi://Adw';
 import Soup from 'gi://Soup?version=3.0';
 import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
+
+import * as config from './config.js';
+
+const PROVIDER_INFO = {
+    zai: { name: 'Z.AI (Zhipu)' },
+    'opencode-go': { name: 'OpenCode Go' },
+    openai: { name: 'OpenAI (ChatGPT Plus/Pro)' },
+    deepseek: { name: 'DeepSeek' },
+};
 
 export default class ZaiUsagePreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
 
         this._buildGeneralPage(window, settings);
-        this._buildProvidersPage(window, settings);
-        this._buildZaiPage(window, settings);
-        this._buildOpenCodeGoPage(window, settings);
-        this._buildOpenAIPage(window, settings);
-        this._buildDeepSeekPage(window, settings);
+        this._buildAccountsPage(window);
         this._buildRefreshPage(window, settings);
     }
 
-    /* ── General page ── */
+    /* ── General page (gsettings) ── */
 
     _buildGeneralPage(window, settings) {
         const page = new Adw.PreferencesPage({
@@ -34,20 +37,8 @@ export default class ZaiUsagePreferences extends ExtensionPreferences {
         });
         window.add(page);
 
-        const displayGroup = new Adw.PreferencesGroup({
-            title: _('Panel Display'),
-        });
+        const displayGroup = new Adw.PreferencesGroup({ title: _('Panel Display') });
         page.add(displayGroup);
-
-        const showPctRow = new Adw.SwitchRow({
-            title: _('Show percentage in panel'),
-            subtitle: _('Display the worst-case usage percentage next to the icon.'),
-            active: settings.get_boolean('show-percentage-in-panel'),
-        });
-        displayGroup.add(showPctRow);
-        showPctRow.connect('notify::active', row => {
-            settings.set_boolean('show-percentage-in-panel', row.active);
-        });
 
         const displayModeRow = new Adw.ComboRow({
             title: _('Display mode'),
@@ -70,9 +61,7 @@ export default class ZaiUsagePreferences extends ExtensionPreferences {
             settings.set_boolean('show-logos', row.active);
         });
 
-        const thresholdGroup = new Adw.PreferencesGroup({
-            title: _('Usage Thresholds'),
-        });
+        const thresholdGroup = new Adw.PreferencesGroup({ title: _('Usage Thresholds') });
         page.add(thresholdGroup);
 
         const highRow = new Adw.SpinRow({
@@ -100,272 +89,282 @@ export default class ZaiUsagePreferences extends ExtensionPreferences {
         });
     }
 
-    /* ── Providers enable/disable page ── */
+    /* ── Accounts page (JSON config) ── */
 
-    _buildProvidersPage(window, settings) {
-        const page = new Adw.PreferencesPage({
-            title: _('Providers'), icon_name: 'preferences-system-symbolic',
+    _buildAccountsPage(window) {
+        this._window = window;
+        this._page = new Adw.PreferencesPage({
+            title: _('Accounts'), icon_name: 'preferences-system-symbolic',
         });
-        window.add(page);
+        window.add(this._page);
 
-        const group = new Adw.PreferencesGroup({
-            title: _('Enabled Providers'),
-            description: _('Select which providers to fetch quota data from.'),
+        this._accountsGroup = new Adw.PreferencesGroup({
+            title: _('Configured Accounts'),
+            description: _('Each account fetches usage independently.'),
         });
-        page.add(group);
+        this._page.add(this._accountsGroup);
 
-        const providers = [
-            { id: 'zai', name: 'Z.AI (Zhipu)' },
-            { id: 'opencode-go', name: 'OpenCode Go' },
-            { id: 'openai', name: 'OpenAI (ChatGPT Plus/Pro)' },
-            { id: 'deepseek', name: 'DeepSeek' },
-        ];
+        this._renderAccountRows();
 
-        const enabledIds = settings.get_strv('enabled-providers') || ['zai', 'openai', 'deepseek'];
-        const enabledSet = new Set(enabledIds.map(s => s.trim().toLowerCase()));
+        // Add account row
+        const addGroup = new Adw.PreferencesGroup();
+        this._page.add(addGroup);
 
-        const rows = {};
-        for (const p of providers) {
-            const row = new Adw.SwitchRow({
-                title: p.name,
-                active: enabledSet.has(p.id),
-            });
-            group.add(row);
-            rows[p.id] = row;
-
-            row.connect('notify::active', () => {
-                this._saveEnabledProviders(settings, providers, rows);
-            });
-        }
-    }
-
-    _saveEnabledProviders(settings, providers, rows) {
-        const enabled = [];
-        for (const p of providers) {
-            if (rows[p.id] && rows[p.id].active)
-                enabled.push(p.id);
-        }
-        if (enabled.length === 0) enabled.push('zai'); // keep at least one
-        settings.set_strv('enabled-providers', enabled);
-    }
-
-    /* ── Z.AI page ── */
-
-    _buildZaiPage(window, settings) {
-        const page = new Adw.PreferencesPage({
-            title: _('Z.AI'), icon_name: 'network-server-symbolic',
+        const addRow = new Adw.ActionRow({
+            title: _('Add Account'),
+            subtitle: _('Choose a provider and create a new account.'),
         });
-        window.add(page);
-
-        // Endpoint
-        const epGroup = new Adw.PreferencesGroup({
-            title: _('Region'),
-        });
-        page.add(epGroup);
-
-        const epRow = new Adw.ComboRow({
-            title: _('API Endpoint'),
-            subtitle: _('Select your Z.AI region.'),
-            model: Gtk.StringList.new([
-                'International (api.z.ai)',
-                'China (open.bigmodel.cn)',
-            ]),
-            selected: settings.get_string('zai-endpoint') === 'cn' ? 1 : 0,
-        });
-        epGroup.add(epRow);
-        epRow.connect('notify::selected', row => {
-            settings.set_string('zai-endpoint', row.selected === 1 ? 'cn' : 'intl');
-        });
-
-        // API Key
-        const keyGroup = new Adw.PreferencesGroup({
-            title: _('API Key Authentication'),
-            description: _('Enter your Z.AI API key from https://z.ai/manage-apikey'),
-        });
-        page.add(keyGroup);
-
-        const apiKeyRow = new Adw.EntryRow({ title: _('API Key') });
-        apiKeyRow.set_text(settings.get_string('zai-api-key'));
-        apiKeyRow.set_show_apply_button(true);
-        apiKeyRow.visibility = false;
-        keyGroup.add(apiKeyRow);
-        apiKeyRow.connect('apply', () => {
-            settings.set_string('zai-api-key', apiKeyRow.get_text().trim());
-        });
-
-        // OAuth
-        const oauthGroup = new Adw.PreferencesGroup({
-            title: _('OAuth Login'),
-            description: _('Log in with your Z.AI account using OAuth.'),
-        });
-        page.add(oauthGroup);
-
-        const hasOauth = !!(settings.get_string('zai-oauth-token'));
-        const oauthStatusRow = new Adw.ActionRow({
-            title: _('Status'),
-            subtitle: hasOauth ? _('Logged in via OAuth') : _('Not logged in'),
-        });
-        oauthGroup.add(oauthStatusRow);
-
-        const loginBtn = new Gtk.Button({
-            label: _('Log In with Z.AI'),
+        const addBtn = new Gtk.Button({
+            label: _('Add'),
             css_classes: ['suggested-action'],
+            valign: Gtk.Align.CENTER,
         });
-        oauthStatusRow.add_suffix(loginBtn);
-        oauthStatusRow.set_activatable_widget(loginBtn);
+        addRow.add_suffix(addBtn);
+        addRow.set_activatable_widget(addBtn);
+        addGroup.add(addRow);
 
-        const logoutBtn = new Gtk.Button({
-            label: _('Log Out'),
+        addBtn.connect('clicked', () => {
+            this._showAddDialog();
+        });
+    }
+
+    _renderAccountRows() {
+        // Clear existing rows: Adw.PreferencesGroup has no get_rows(), so
+        // rebuild the group from scratch.
+        this._page.remove(this._accountsGroup);
+        this._accountsGroup = new Adw.PreferencesGroup({
+            title: _('Configured Accounts'),
+            description: _('Each account fetches usage independently.'),
+        });
+        // Re-insert before the "add account" group (which is the last child).
+        this._page.insert(this._accountsGroup, 0);
+
+        const cfg = config.load();
+        for (const acc of cfg.accounts)
+            this._accountsGroup.add(this._buildAccountRow(acc));
+    }
+
+    _buildAccountRow(acc) {
+        const provName = PROVIDER_INFO[acc.provider]?.name || acc.provider;
+        const row = new Adw.ExpanderRow({
+            title: acc.label || provName,
+            subtitle: provName,
+        });
+
+        // Enabled switch
+        const switchBtn = new Gtk.Switch({
+            active: acc.enabled !== false,
+            valign: Gtk.Align.CENTER,
+        });
+        row.add_suffix(switchBtn);
+        switchBtn.connect('notify::active', w => {
+            this._updateAccount(acc.id, a => { a.enabled = w.active; });
+        });
+
+        // Label field
+        const labelBox = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL, spacing: 6,
+            margin_top: 12, margin_bottom: 12, margin_start: 12, margin_end: 12,
+        });
+
+        const labelEntry = new Adw.EntryRow({ title: _('Account label') });
+        labelEntry.set_text(acc.label || '');
+        labelEntry.set_show_apply_button(true);
+        labelBox.append(labelEntry);
+        labelEntry.connect('apply', () => {
+            this._updateAccount(acc.id, a => { a.label = labelEntry.get_text().trim(); });
+        });
+
+        row.add_row(labelBox);
+
+        // Provider-specific credential fields (added as additional rows)
+        this._addCredentialRows(row, acc);
+
+        // Remove button
+        const removeBox = new Gtk.Box({
+            orientation: Gtk.Orientation.HORIZONTAL,
+            halign: Gtk.Align.CENTER,
+            margin_top: 12, margin_bottom: 12,
+        });
+        const removeBtn = new Gtk.Button({
+            label: _('Remove Account'),
             css_classes: ['destructive-action'],
-            visible: hasOauth,
         });
-        oauthStatusRow.add_suffix(logoutBtn);
+        removeBox.append(removeBtn);
+        row.add_row(removeBox);
 
-        loginBtn.connect('clicked', () => {
-            this._startZaiOAuth(settings, oauthStatusRow, loginBtn, logoutBtn);
+        removeBtn.connect('clicked', () => {
+            this._removeAccount(acc.id);
         });
 
-        logoutBtn.connect('clicked', () => {
-            settings.set_string('zai-oauth-token', '');
-            settings.set_string('zai-oauth-refresh', '');
-            settings.set_int('zai-oauth-expiry', 0);
-            oauthStatusRow.set_subtitle(_('Not logged in'));
-            logoutBtn.visible = false;
-            loginBtn.sensitive = true;
-        });
+        return row;
     }
 
-    /* ── OpenCode Go page ── */
+    _addCredentialRows(row, acc) {
+        const c = acc.credentials || {};
 
-    _buildOpenCodeGoPage(window, settings) {
-        const page = new Adw.PreferencesPage({
-            title: _('OpenCode Go'), icon_name: 'network-server-symbolic',
-        });
-        window.add(page);
+        if (acc.provider === 'zai') {
+            // Endpoint
+            const endpointRow = new Adw.ComboRow({
+                title: _('Region'),
+                model: Gtk.StringList.new([_('International (api.z.ai)'), _('China (open.bigmodel.cn)')]),
+                selected: c.endpoint === 'cn' ? 1 : 0,
+            });
+            row.add_row(endpointRow);
+            endpointRow.connect('notify::selected', r => {
+                this._updateAccount(acc.id, a => {
+                    a.credentials.endpoint = r.selected === 1 ? 'cn' : 'intl';
+                });
+            });
 
-        const infoGroup = new Adw.PreferencesGroup({
-            title: _('Dashboard Credentials'),
-            description: _('These are extracted from your OpenCode browser session. Open the OpenCode Go dashboard in your browser, then use DevTools to copy the workspace ID (from the URL) and auth cookie value.'),
-        });
-        page.add(infoGroup);
+            // API key
+            row.add_row(this._entryRow(_('API Key'), c.apiKey || '', true, val =>
+                this._updateAccount(acc.id, a => { a.credentials.apiKey = val; })));
 
-        const widRow = new Adw.EntryRow({
-            title: _('Workspace ID'),
-        });
-        widRow.set_text(settings.get_string('opencode-go-workspace-id'));
-        widRow.set_show_apply_button(true);
-        infoGroup.add(widRow);
-        widRow.connect('apply', () => {
-            settings.set_string('opencode-go-workspace-id', widRow.get_text().trim());
-        });
+            // OAuth
+            const oauthRow = new Adw.ActionRow({ title: _('OAuth Login') });
+            row.add_row(oauthRow);
+            const loginBtn = new Gtk.Button({
+                label: _('Log In with Z.AI'),
+                css_classes: ['suggested-action'],
+                valign: Gtk.Align.CENTER,
+            });
+            const logoutBtn = new Gtk.Button({
+                label: _('Log Out'),
+                css_classes: ['destructive-action'],
+                valign: Gtk.Align.CENTER,
+                visible: !!(c.oauthToken),
+            });
+            oauthRow.add_suffix(loginBtn);
+            oauthRow.add_suffix(logoutBtn);
+            loginBtn.connect('clicked', () => {
+                this._startZaiOAuth(acc, oauthRow, loginBtn, logoutBtn);
+            });
+            logoutBtn.connect('clicked', () => {
+                this._updateAccount(acc.id, a => {
+                    a.credentials.oauthToken = '';
+                    a.credentials.oauthRefresh = '';
+                    a.credentials.oauthExpiry = 0;
+                });
+                logoutBtn.visible = false;
+            });
+        }
 
-        const cookieRow = new Adw.EntryRow({
-            title: _('Auth Cookie'),
-        });
-        cookieRow.set_text(settings.get_string('opencode-go-auth-cookie'));
-        cookieRow.set_show_apply_button(true);
-        cookieRow.visibility = false;
-        infoGroup.add(cookieRow);
-        cookieRow.connect('apply', () => {
-            settings.set_string('opencode-go-auth-cookie', cookieRow.get_text().trim());
-        });
+        if (acc.provider === 'opencode-go') {
+            row.add_row(this._entryRow(_('Workspace ID'), c.workspaceId || '', false, val =>
+                this._updateAccount(acc.id, a => { a.credentials.workspaceId = val; })));
+            row.add_row(this._entryRow(_('Auth Cookie'), c.authCookie || '', true, val =>
+                this._updateAccount(acc.id, a => { a.credentials.authCookie = val; })));
+        }
 
-        const statusGroup = new Adw.PreferencesGroup({ title: _('Status') });
-        page.add(statusGroup);
+        if (acc.provider === 'openai') {
+            row.add_row(this._entryRow(_('OAuth Access Token'), c.oauthToken || '', true, val =>
+                this._updateAccount(acc.id, a => { a.credentials.oauthToken = val; })));
+            row.add_row(this._entryRow(_('Refresh Token (optional)'), c.oauthRefresh || '', true, val =>
+                this._updateAccount(acc.id, a => { a.credentials.oauthRefresh = val; })));
+        }
 
-        const hasWid = !!(settings.get_string('opencode-go-workspace-id'));
-        const hasCookie = !!(settings.get_string('opencode-go-auth-cookie'));
-        const status = (hasWid && hasCookie) ? _('Configured') : _('Not configured');
-        const statusRow = new Adw.ActionRow({
-            title: _('Status'), subtitle: status,
-        });
-        statusGroup.add(statusRow);
+        if (acc.provider === 'deepseek') {
+            row.add_row(this._entryRow(_('API Key'), c.apiKey || '', true, val =>
+                this._updateAccount(acc.id, a => { a.credentials.apiKey = val; })));
+        }
     }
 
-    /* ── OpenAI page ── */
-
-    _buildOpenAIPage(window, settings) {
-        const page = new Adw.PreferencesPage({
-            title: _('OpenAI'), icon_name: 'network-server-symbolic',
+    _entryRow(title, text, hidden, onApply) {
+        const entry = new Adw.EntryRow({ title });
+        entry.set_text(text);
+        entry.set_show_apply_button(true);
+        if (hidden) entry.visibility = false;
+        entry.connect('apply', () => {
+            onApply(entry.get_text().trim());
         });
-        window.add(page);
-
-        const oauthGroup = new Adw.PreferencesGroup({
-            title: _('OAuth Token'),
-            description: _('Enter your ChatGPT OAuth access token. You can extract this from your browser session or OpenCode auth.json.'),
-        });
-        page.add(oauthGroup);
-
-        const tokenRow = new Adw.EntryRow({
-            title: _('OAuth Access Token'),
-        });
-        tokenRow.set_text(settings.get_string('openai-oauth-token'));
-        tokenRow.set_show_apply_button(true);
-        tokenRow.visibility = false;
-        oauthGroup.add(tokenRow);
-        tokenRow.connect('apply', () => {
-            settings.set_string('openai-oauth-token', tokenRow.get_text().trim());
-        });
-
-        const refreshRow = new Adw.EntryRow({
-            title: _('Refresh Token (optional)'),
-        });
-        refreshRow.set_text(settings.get_string('openai-oauth-refresh'));
-        refreshRow.set_show_apply_button(true);
-        refreshRow.visibility = false;
-        oauthGroup.add(refreshRow);
-        refreshRow.connect('apply', () => {
-            settings.set_string('openai-oauth-refresh', refreshRow.get_text().trim());
-        });
-
-        const statusGroup = new Adw.PreferencesGroup({
-            title: _('Status'),
-        });
-        page.add(statusGroup);
-
-        const hasToken = !!(settings.get_string('openai-oauth-token'));
-        const statusRow = new Adw.ActionRow({
-            title: _('Token'),
-            subtitle: hasToken ? _('Configured') : _('Not configured'),
-        });
-        statusGroup.add(statusRow);
+        return entry;
     }
 
-    /* ── DeepSeek page ── */
+    /* ── Config mutations ── */
 
-    _buildDeepSeekPage(window, settings) {
-        const page = new Adw.PreferencesPage({
-            title: _('DeepSeek'), icon_name: 'network-server-symbolic',
-        });
-        window.add(page);
-
-        const keyGroup = new Adw.PreferencesGroup({
-            title: _('API Key'),
-            description: _('Enter your DeepSeek API key from https://platform.deepseek.com/api_keys'),
-        });
-        page.add(keyGroup);
-
-        const apiKeyRow = new Adw.EntryRow({ title: _('API Key') });
-        apiKeyRow.set_text(settings.get_string('deepseek-api-key'));
-        apiKeyRow.set_show_apply_button(true);
-        apiKeyRow.visibility = false;
-        keyGroup.add(apiKeyRow);
-        apiKeyRow.connect('apply', () => {
-            settings.set_string('deepseek-api-key', apiKeyRow.get_text().trim());
-        });
-
-        const statusGroup = new Adw.PreferencesGroup({ title: _('Status') });
-        page.add(statusGroup);
-
-        const hasKey = !!(settings.get_string('deepseek-api-key'));
-        const statusRow = new Adw.ActionRow({
-            title: _('API Key'),
-            subtitle: hasKey ? _('Configured') : _('Not configured'),
-        });
-        statusGroup.add(statusRow);
+    _updateAccount(accountId, mutator) {
+        const cfg = config.load();
+        const acc = cfg.accounts.find(a => a.id === accountId);
+        if (!acc) return;
+        if (!acc.credentials) acc.credentials = {};
+        mutator(acc);
+        config.save(cfg);
+        // Don't re-render rows here — rebuilding destroys the entry widgets
+        // while the user is typing in another field. The file monitor in
+        // extension.js will pick up the change and refresh the panel.
     }
 
-    /* ── Refresh page ── */
+    _removeAccount(accountId) {
+        const cfg = config.load();
+        cfg.accounts = cfg.accounts.filter(a => a.id !== accountId);
+        config.save(cfg);
+        this._renderAccountRows();
+    }
+
+    _addAccount(provider, label) {
+        const cfg = config.load();
+        const acc = {
+            id: config.genId(),
+            label: label || PROVIDER_INFO[provider]?.name || provider,
+            provider,
+            enabled: true,
+            credentials: this._defaultCredentials(provider),
+        };
+        cfg.accounts.push(acc);
+        config.save(cfg);
+        this._renderAccountRows();
+    }
+
+    _defaultCredentials(provider) {
+        if (provider === 'zai') return { apiKey: '', oauthToken: '', oauthRefresh: '', oauthExpiry: 0, endpoint: 'intl' };
+        if (provider === 'openai') return { oauthToken: '', oauthRefresh: '', oauthExpiry: 0 };
+        if (provider === 'deepseek') return { apiKey: '' };
+        if (provider === 'opencode-go') return { workspaceId: '', authCookie: '' };
+        return {};
+    }
+
+    _showAddDialog() {
+        const dialog = new Adw.MessageDialog({
+            heading: _('Add Account'),
+            body: _('Choose a provider and optional label.'),
+            transient_for: this._window,
+        });
+
+        const box = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL, spacing: 12,
+            margin_top: 12, margin_bottom: 12,
+        });
+
+        const providerModel = Gtk.StringList.new(
+            Object.values(PROVIDER_INFO).map(p => p.name));
+        const providerCombo = new Gtk.DropDown({ model: providerModel });
+        box.append(new Gtk.Label({ label: _('Provider'), halign: Gtk.Align.START }));
+        box.append(providerCombo);
+
+        const labelEntry = new Gtk.Entry({ placeholder_text: _('Account label (optional)') });
+        box.append(new Gtk.Label({ label: _('Label'), halign: Gtk.Align.START }));
+        box.append(labelEntry);
+
+        dialog.set_extra_child(box);
+
+        dialog.add_response('cancel', _('Cancel'));
+        dialog.add_response('add', _('Add'));
+        dialog.set_response_appearance('add', Adw.ResponseAppearance.SUGGESTED);
+
+        dialog.connect('response', (d, response) => {
+            if (response === 'add') {
+                const idx = providerCombo.get_selected();
+                const providerId = Object.keys(PROVIDER_INFO)[idx];
+                this._addAccount(providerId, labelEntry.get_text().trim());
+            }
+            d.close();
+        });
+
+        dialog.present();
+    }
+
+    /* ── Refresh page (gsettings) ── */
 
     _buildRefreshPage(window, settings) {
         const page = new Adw.PreferencesPage({
@@ -375,7 +374,7 @@ export default class ZaiUsagePreferences extends ExtensionPreferences {
 
         const group = new Adw.PreferencesGroup({
             title: _('Update Interval'),
-            description: _('How often to fetch usage data from all enabled providers.'),
+            description: _('How often to fetch usage data from all enabled accounts.'),
         });
         page.add(group);
 
@@ -393,8 +392,9 @@ export default class ZaiUsagePreferences extends ExtensionPreferences {
 
     /* ── Z.AI OAuth flow ── */
 
-    async _startZaiOAuth(settings, statusRow, loginBtn, logoutBtn) {
-        const endpoint = settings.get_string('zai-endpoint') === 'cn' ? 'cn' : 'intl';
+    async _startZaiOAuth(acc, statusRow, loginBtn, logoutBtn) {
+        const c = acc.credentials || {};
+        const endpoint = c.endpoint === 'cn' ? 'cn' : 'intl';
         const provider = endpoint === 'cn' ? 'bigmodel' : 'zai';
 
         const oauthUrls = {
@@ -409,7 +409,7 @@ export default class ZaiUsagePreferences extends ExtensionPreferences {
                 auth: 'https://bigmodel.cn',
             },
         };
-        const config = oauthUrls[endpoint] || oauthUrls.intl;
+        const oauthConfig = oauthUrls[endpoint] || oauthUrls.intl;
 
         loginBtn.sensitive = false;
         loginBtn.label = _('Starting login...');
@@ -419,7 +419,7 @@ export default class ZaiUsagePreferences extends ExtensionPreferences {
             const session = new Soup.Session();
             const initBody = JSON.stringify({ provider });
 
-            const initMsg = Soup.Message.new('POST', config.init);
+            const initMsg = Soup.Message.new('POST', oauthConfig.init);
             initMsg.set_request_body_from_bytes(
                 'application/json',
                 new GLib.Bytes(new TextEncoder().encode(initBody)));
@@ -455,7 +455,7 @@ export default class ZaiUsagePreferences extends ExtensionPreferences {
                 statusRow.set_subtitle(_(`Open: ${authUrl}`));
             }
 
-            const pollUrl = `${config.poll}/${flowId}`;
+            const pollUrl = `${oauthConfig.poll}/${flowId}`;
             const maxAttempts = 120;
 
             for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -491,10 +491,12 @@ export default class ZaiUsagePreferences extends ExtensionPreferences {
 
                     if (!token) throw new Error('OAuth succeeded but no token returned');
 
-                    settings.set_string('zai-oauth-token', token);
-                    if (refreshToken) settings.set_string('zai-oauth-refresh', refreshToken);
-                    if (expiresIn > 0)
-                        settings.set_int('zai-oauth-expiry', Math.floor(Date.now() / 1000) + expiresIn);
+                    this._updateAccount(acc.id, a => {
+                        a.credentials.oauthToken = token;
+                        if (refreshToken) a.credentials.oauthRefresh = refreshToken;
+                        if (expiresIn > 0)
+                            a.credentials.oauthExpiry = Math.floor(Date.now() / 1000) + expiresIn;
+                    });
 
                     statusRow.set_subtitle(_('Logged in via OAuth'));
                     loginBtn.label = _('Log In with Z.AI');

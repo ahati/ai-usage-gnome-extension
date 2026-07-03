@@ -27,12 +27,12 @@ function clampPercent(val) {
     return Math.max(0, Math.min(100, val));
 }
 
-function getAuthHeaders(settings) {
-    const apiKey = settings.get_string('zai-api-key');
+function getAuthHeaders(credentials) {
+    const apiKey = credentials.apiKey;
     if (apiKey && apiKey.length > 0) {
         return { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
     }
-    const oauthToken = settings.get_string('zai-oauth-token');
+    const oauthToken = credentials.oauthToken;
     if (oauthToken && oauthToken.length > 0) {
         return { 'Authorization': `Bearer ${oauthToken}`, 'Content-Type': 'application/json' };
     }
@@ -45,14 +45,12 @@ export const zaiProvider = {
     logoFile: 'zai-logo.svg',
     fullColorLogo: true,
 
-    needsAuth(settings) {
-        const hasApiKey = !!(settings.get_string('zai-api-key'));
-        const hasOAuth = !!(settings.get_string('zai-oauth-token'));
-        return hasApiKey || hasOAuth;
+    needsAuth(credentials) {
+        return !!(credentials.apiKey || credentials.oauthToken);
     },
 
-    getOAuthConfig(settings) {
-        const endpoint = settings.get_string('zai-endpoint') || 'intl';
+    getOAuthConfig(credentials) {
+        const endpoint = credentials.endpoint || 'intl';
         const config = ZAI_ENDPOINTS[endpoint] || ZAI_ENDPOINTS.intl;
         return {
             initUrl: config.oauthInit,
@@ -61,11 +59,11 @@ export const zaiProvider = {
         };
     },
 
-    async fetch(session, settings) {
-        const headers = getAuthHeaders(settings);
+    async fetch(session, credentials) {
+        const headers = getAuthHeaders(credentials);
         if (!headers) return { attempted: false };
 
-        const endpoint = settings.get_string('zai-endpoint') || 'intl';
+        const endpoint = credentials.endpoint || 'intl';
         const quotaUrl = ZAI_ENDPOINTS[endpoint]?.quota || ZAI_ENDPOINTS.intl.quota;
 
         try {

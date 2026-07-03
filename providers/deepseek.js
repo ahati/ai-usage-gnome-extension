@@ -13,8 +13,8 @@ const USER_AGENT = 'OpenCode-Quota-Toast/1.0';
 
 const CURRENCY_SYMBOLS = { CNY: '¥', USD: '$' };
 
-function getAuthHeaders(settings) {
-    const apiKey = settings.get_string('deepseek-api-key');
+function getAuthHeaders(credentials) {
+    const apiKey = credentials.apiKey;
     if (apiKey && apiKey.length > 0) {
         return { 'Authorization': `Bearer ${apiKey}`, 'User-Agent': USER_AGENT };
     }
@@ -35,12 +35,12 @@ export const deepseekProvider = {
     label: 'DeepSeek',
     logoFile: 'deepseek-symbolic.svg',
 
-    needsAuth(settings) {
-        return !!(settings.get_string('deepseek-api-key'));
+    needsAuth(credentials) {
+        return !!(credentials.apiKey);
     },
 
-    async fetch(session, settings) {
-        const headers = getAuthHeaders(settings);
+    async fetch(session, credentials) {
+        const headers = getAuthHeaders(credentials);
         if (!headers) return { attempted: false };
 
         try {

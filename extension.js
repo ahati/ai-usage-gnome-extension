@@ -1,7 +1,7 @@
 /* AI Usage Monitor — GNOME Shell Extension
  *
- * CodexBar-style UI: pill meter in the panel, tabbed provider popup with
- * progress bars and a header row of icon buttons.
+ * CodexBar-style UI with multi-account support. Accounts are stored in a
+ * JSON config file (see config.js). Tabs/results are keyed per-account.
  */
 
 import GObject from 'gi://GObject';
@@ -14,15 +14,20 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
+import * as config from './config.js';
 import { zaiProvider } from './providers/zai.js';
 import { opencodeGoProvider } from './providers/opencode-go.js';
 import { openaiProvider } from './providers/openai.js';
 import { deepseekProvider } from './providers/deepseek.js';
 
-const ALL_PROVIDERS = [zaiProvider, opencodeGoProvider, openaiProvider, deepseekProvider];
+const PROVIDER_REGISTRY = {
+    zai: zaiProvider,
+    'opencode-go': opencodeGoProvider,
+    openai: openaiProvider,
+    deepseek: deepseekProvider,
+};
 
 /* Adwaita-derived palette */
-const COLOR_BLUE = '#3584e4';
 const COLOR_GREEN = '#2ec27e';
 const COLOR_YELLOW = '#f6d32d';
 const COLOR_ORANGE = '#ff7800';
@@ -54,9 +59,6 @@ function fmtReset(iso) {
     return `resets ${Math.floor(h / 24)}d ${h % 24}h`;
 }
 
-/* Pick a color from the warning ramp based on the displayed percentage.
- * `displayed` is the value the user sees (used% in "used" mode, remaining% in
- * "remaining" mode), so thresholds apply intuitively in either mode. */
 function usageColor(displayed, settings) {
     if (displayed === null || displayed === undefined) return COLOR_MUTED;
     const high = settings.get_int('high-usage-threshold');
@@ -75,8 +77,8 @@ const Indicator = GObject.registerClass(
             this._ext = ext;
             this._settings = ext.getSettings();
             this._pollId = 0;
-            this._results = {};
-            this._activeProviderId = null;
+            this._results = {};              // keyed by account id
+            this._activeAccountId = null;
 
             /* ── Panel: gauge icon, colored by usage severity ── */
             this._panelIcon = new St.Icon({
@@ -89,16 +91,14 @@ const Indicator = GObject.registerClass(
             this._settingsId = this._settings.connect('changed', () => {
                 this._scheduleRefresh(0);
             });
+            this._setupConfigMonitor();
             this._scheduleRefresh();
         }
 
-        /* ── Menu skeleton ── */
-
         _buildMenu() {
-            // Style the popup box so our CSS namespace applies.
             this.menu.box.add_style_class_name('codexbar-popup');
 
-            // Header row: title + refresh + settings icon buttons.
+            // Header row
             this._headerBox = new St.BoxLayout({
                 style_class: 'codexbar-header',
                 x_expand: true,
@@ -127,13 +127,13 @@ const Indicator = GObject.registerClass(
             this._headerBox.add_child(this._settingsBtn);
             this.menu.box.add_child(this._headerBox);
 
-            // Provider tabs row.
+            // Provider tabs row
             this._tabsContainer = new St.BoxLayout({
                 style_class: 'codexbar-tabs-container',
             });
             this.menu.box.add_child(this._tabsContainer);
 
-            // Content area, rebuilt on every data update / tab switch.
+            // Content area
             this._contentBox = new St.BoxLayout({
                 style_class: 'codexbar-usage-section',
                 vertical: true,
@@ -153,43 +153,61 @@ const Indicator = GObject.registerClass(
             return btn;
         }
 
-        _getEnabled() {
-            const ids = this._settings.get_strv('enabled-providers');
-            if (!ids || ids.length === 0) return ALL_PROVIDERS;
-            const s = new Set(ids.map(x => x.trim().toLowerCase()));
-            return ALL_PROVIDERS.filter(p => s.has(p.id));
+        /* Watch config.json for external changes (e.g. prefs edits). */
+        _setupConfigMonitor() {
+            const file = Gio.File.new_for_path(config.configPath());
+            try {
+                this._configMonitor = file.monitor_file(Gio.FileMonitorFlags.NONE, null);
+                this._configMonitorId = this._configMonitor.connect('changed', () => {
+                    this._scheduleRefresh(0);
+                });
+            } catch (e) {
+                log(`[ai-usage] could not monitor config: ${e}`);
+            }
+        }
+
+        /* Build [{account, provider}] for enabled, authenticated accounts. */
+        _getAccounts() {
+            const cfg = config.load();
+            const out = [];
+            for (const acc of cfg.accounts) {
+                if (!acc.enabled) continue;
+                const provider = PROVIDER_REGISTRY[acc.provider];
+                if (!provider) continue;
+                out.push({ account: acc, provider });
+            }
+            return out;
         }
 
         /* ── Tabs ── */
 
         _renderTabs() {
             this._tabsContainer.destroy_all_children();
-            const enabled = this._getEnabled();
+            const accounts = this._getAccounts();
             const showLogos = this._settings.get_boolean('show-logos');
 
-            // Keep a valid active provider.
-            if (!enabled.some(p => p.id === this._activeProviderId))
-                this._activeProviderId = enabled[0]?.id ?? null;
+            if (!accounts.some(a => a.account.id === this._activeAccountId))
+                this._activeAccountId = accounts[0]?.account.id ?? null;
 
-            for (const prov of enabled) {
+            for (const { account, provider } of accounts) {
                 const btn = new St.Button({
                     style_class: 'codexbar-tab',
                     can_focus: true,
                 });
                 const inner = new St.BoxLayout({ y_align: Clutter.ActorAlign.CENTER });
                 if (showLogos) {
-                    const logo = this._providerLogo(prov);
+                    const logo = this._providerLogo(provider);
                     if (logo) inner.add_child(logo);
                 }
                 inner.add_child(new St.Label({
-                    text: prov.label,
+                    text: account.label || provider.label,
                     y_align: Clutter.ActorAlign.CENTER,
                 }));
                 btn.set_child(inner);
-                if (prov.id === this._activeProviderId)
+                if (account.id === this._activeAccountId)
                     btn.add_style_class_name('codexbar-tab-active');
                 btn.connect('clicked', () => {
-                    this._activeProviderId = prov.id;
+                    this._activeAccountId = account.id;
                     this._renderTabs();
                     this._renderContent();
                     return Clutter.EVENT_PROPAGATE;
@@ -198,25 +216,20 @@ const Indicator = GObject.registerClass(
             }
         }
 
-        _providerLogo(prov) {
-            if (!prov.logoFile) return null;
+        _providerLogo(provider) {
+            if (!provider.logoFile) return null;
             const path = GLib.build_filenamev([
-                this._ext.path, 'media', 'logos', prov.logoFile,
+                this._ext.path, 'media', 'logos', provider.logoFile,
             ]);
             if (!GLib.file_test(path, GLib.FileTest.EXISTS)) return null;
             try {
-                // Full-color brand logos (e.g. Z.AI) keep their original colors;
-                // plain symbolic logos are forced monochrome to match the theme.
-                // NOTE: don't stack both classes — St won't reliably let a later
-                // class override -st-icon-style, so symbolic would flatten everything.
-                const cls = prov.fullColorLogo
+                const cls = provider.fullColorLogo
                     ? 'codexbar-tab-icon-color'
                     : 'codexbar-tab-icon';
-                const icon = new St.Icon({
+                return new St.Icon({
                     gicon: Gio.Icon.new_for_string(path),
                     style_class: cls,
                 });
-                return icon;
             } catch (e) {
                 return null;
             }
@@ -227,27 +240,27 @@ const Indicator = GObject.registerClass(
         _renderContent() {
             this._contentBox.destroy_all_children();
 
-            const enabled = this._getEnabled();
-            const prov = enabled.find(p => p.id === this._activeProviderId);
-            if (!prov) {
-                this._addHint(this._contentBox, 'Configure providers in Preferences…');
+            const accounts = this._getAccounts();
+            const active = accounts.find(a => a.account.id === this._activeAccountId);
+            if (!active) {
+                this._addHint(this._contentBox, 'Configure accounts in Preferences…');
                 return;
             }
 
-            const res = this._results[prov.id];
+            const { account, provider } = active;
+            const res = this._results[account.id];
             if (!res || !res.attempted) {
                 this._addHint(this._contentBox, 'No data yet — refresh to fetch.');
                 return;
             }
 
-            // Errors take precedence if there is nothing else to show.
-            if ((!res.entries || res.entries.length === 0)) {
+            if (!res.entries || res.entries.length === 0) {
                 if (res.errors && res.errors.length) {
                     for (const err of res.errors)
                         this._addError(this._contentBox, err);
                 } else {
                     this._addHint(this._contentBox,
-                        'No usage data. Configure this provider in Preferences…');
+                        'No usage data. Configure this account in Preferences…');
                 }
                 return;
             }
@@ -273,8 +286,6 @@ const Indicator = GObject.registerClass(
                 const pctRemaining = clamp(100 - pctUsed);
                 this._addTitle(parent, e.label || 'Usage');
 
-                // Full-width track split into two segments laid out left to right:
-                //   free/remaining (green, left)  |  used (gray, right)
                 const freeColor = usageColor(this._displayedValue(pctUsed, pctRemaining), this._settings);
                 const track = new St.BoxLayout({
                     style_class: 'codexbar-progress-container',
@@ -282,8 +293,10 @@ const Indicator = GObject.registerClass(
                 if (pctRemaining > 0) {
                     track.add_child(new St.Widget({
                         style_class: 'codexbar-progress-free',
-                        x_expand: false,
-                        width: Math.round((pctRemaining / 100) * BAR_WIDTH),
+                        // When there's no used segment, expand to fill the track;
+                        // otherwise use a fixed width so the used segment gets the rest.
+                        x_expand: pctUsed === 0,
+                        width: pctUsed === 0 ? -1 : Math.round((pctRemaining / 100) * BAR_WIDTH),
                         style: `background-color: ${freeColor};`,
                     }));
                 }
@@ -295,7 +308,6 @@ const Indicator = GObject.registerClass(
                 }
                 parent.add_child(track);
 
-                // Stats row: percent + reset on the right.
                 const stats = new St.BoxLayout({ x_expand: true });
                 const leftText = this._settings.get_string('display-mode') === 'remaining'
                     ? `${Math.round(pctRemaining)}% left`
@@ -358,9 +370,9 @@ const Indicator = GObject.registerClass(
         /* ── Panel update ── */
 
         _updatePanel() {
-            let worstRemaining = null; // lowest remaining% = worst usage
-            for (const p of this._getEnabled()) {
-                const r = this._results[p.id];
+            let worstRemaining = null;
+            for (const { account } of this._getAccounts()) {
+                const r = this._results[account.id];
                 if (!r || !r.attempted) continue;
                 for (const e of r.entries) {
                     if (e.kind === 'percent') {
@@ -387,17 +399,16 @@ const Indicator = GObject.registerClass(
 
         async _fetchAll() {
             const s = new Soup.Session();
-            const enabled = this._getEnabled();
-            log(`[ai-usage] Fetching ${enabled.map(p => p.id).join(', ')}`);
-            const ps = enabled.map(p =>
-                p.fetch(s, this._settings).then(r => {
-                    this._results[p.id] = r;
-                    log(`[ai-usage] ${p.id}: attempted=${r.attempted} entries=${r.entries?.length || 0} errors=${r.errors?.length || 0}`);
-                    if (r.errors && r.errors.length) log(`[ai-usage] ${p.id} ERROR: ${r.errors[0]}`);
+            const accounts = this._getAccounts();
+            log(`[ai-usage] Fetching ${accounts.length} account(s)`);
+            const ps = accounts.map(({ account, provider }) =>
+                provider.fetch(s, account.credentials).then(r => {
+                    this._results[account.id] = r;
+                    log(`[ai-usage] ${account.label}: attempted=${r.attempted} entries=${r.entries?.length || 0} errors=${r.errors?.length || 0}`);
                 }).catch(e => {
-                    this._results[p.id] = {
+                    this._results[account.id] = {
                         attempted: true, entries: [],
-                        errors: [`${p.label}: ${e.message || e}`],
+                        errors: [`${account.label}: ${e.message || e}`],
                     };
                 }));
             await Promise.all(ps);
@@ -433,6 +444,10 @@ const Indicator = GObject.registerClass(
         destroy() {
             if (this._pollId) { GLib.source_remove(this._pollId); this._pollId = 0; }
             if (this._settingsId) { this._settings.disconnect(this._settingsId); this._settingsId = 0; }
+            if (this._configMonitorId && this._configMonitor) {
+                this._configMonitor.disconnect(this._configMonitorId);
+                this._configMonitorId = 0;
+            }
             super.destroy();
         }
     }
