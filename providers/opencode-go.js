@@ -52,7 +52,24 @@ export const opencodeGoProvider = {
                     errors: ['OpenCode Go: auth cookie expired. Re-authenticate and update in Preferences.'] };
             }
 
-            return this._parseSSR(goHtml);
+            const result = this._parseSSR(goHtml);
+
+            // Also fetch the /usage page which has per-request usage records
+            // inlined in the SSR stream — use them to render a bar chart.
+            try {
+                const usageUrl = `${BASE}/workspace/${encodeURIComponent(workspaceId)}/usage`;
+                const usageHtml = await this._get(session, usageUrl, authCookie);
+                if (usageHtml) {
+                    const usageBars = this._parseUsageRecords(usageHtml);
+                    if (usageBars)
+                        result.entries.push(usageBars);
+                }
+            } catch (e) {
+                // Bar chart is optional — don't fail the whole fetch.
+                log(`[ai-usage] OpenCode Go usage bars failed: ${e}`);
+            }
+
+            return result;
         } catch (e) {
             return { attempted: true, entries: [],
                 errors: [`OpenCode Go: ${e.message || e}`] };
@@ -135,5 +152,58 @@ export const opencodeGoProvider = {
         }
 
         return { attempted: true, entries, errors: [] };
+    },
+
+    /* Parse per-request usage records from the /usage page's SSR stream
+     * and aggregate them into hourly buckets for the bar chart. */
+    _parseUsageRecords(body) {
+        // Each record looks like:
+        //   inputTokens:67,outputTokens:131,reasoningTokens:80
+        // Pairs with timeCreated:$R[..]=new Date("2026-07-03T20:53:08.000Z")
+        const tokenRe = /inputTokens:(\d+),outputTokens:(\d+),reasoningTokens:(\d+)/g;
+        const timeRe = /timeCreated:\$R\[\d+\]=new Date\("([^"]+)"\)/g;
+
+        const tokens = [];
+        let m;
+        while ((m = tokenRe.exec(body)) !== null)
+            tokens.push(Number(m[1]) + Number(m[2]) + Number(m[3]));
+
+        const times = [];
+        while ((m = timeRe.exec(body)) !== null)
+            times.push(new Date(m[1]).getTime());
+
+        if (tokens.length === 0 || times.length === 0)
+            return null;
+
+        // Pair times with tokens (they appear in the same order in the SSR stream).
+        const count = Math.min(tokens.length, times.length);
+
+        // Bucket by hour for the last 24 hours.
+        const now = Date.now();
+        const bucketMs = 3600000; // 1 hour
+        const numBuckets = 24;
+        const buckets = new Array(numBuckets).fill(0);
+
+        for (let i = 0; i < count; i++) {
+            const ageHrs = Math.floor((now - times[i]) / bucketMs);
+            if (ageHrs >= 0 && ageHrs < numBuckets)
+                buckets[numBuckets - 1 - ageHrs] += tokens[i];
+        }
+
+        // Compress to show only the last 12 hours for a cleaner chart.
+        const showBuckets = 12;
+        const bars = [];
+        for (let i = numBuckets - showBuckets; i < numBuckets; i++) {
+            const hour = new Date(now - (numBuckets - 1 - i) * bucketMs);
+            const label = `${hour.getHours().toString().padStart(2, '0')}h`;
+            bars.push({ label, value: buckets[i] });
+        }
+
+        return {
+            kind: 'barchart',
+            name: 'OpenCode Go Usage',
+            label: 'Token Usage (12h)',
+            bars,
+        };
     },
 };

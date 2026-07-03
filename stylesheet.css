@@ -108,3 +108,19 @@
     height: 16px;
     margin-bottom: 8px;
 }
+
+/* Bar chart: St.DrawingArea for token usage history */
+.ai-usage-barchart {
+    height: 60px;
+    margin-bottom: 4px;
+}
+
+.ai-usage-barchart-labels {
+    spacing: 0;
+    margin-bottom: 8px;
+}
+
+.ai-usage-barchart-label {
+    font-size: 0.65em;
+    color: #888888;
+}

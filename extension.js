@@ -364,6 +364,8 @@ const Indicator = GObject.registerClass(
                         style_class: 'ai-usage-usage-subtitle ai-usage-usage-subtitle-right',
                     }));
                 parent.add_child(stats);
+            } else if (e.kind === 'barchart') {
+                this._addBarChart(parent, e);
             } else {
                 this._addTitle(parent, e.label || 'Value');
                 parent.add_child(new St.Label({
@@ -371,6 +373,54 @@ const Indicator = GObject.registerClass(
                     style_class: 'ai-usage-usage-subtitle',
                 }));
             }
+        }
+
+        _addBarChart(parent, e) {
+            const bars = e.bars || [];
+            if (bars.length === 0) return;
+            const maxVal = Math.max(...bars.map(b => b.value), 1);
+
+            this._addTitle(parent, e.label || 'Usage');
+
+            // Chart area: Cairo-drawn vertical bars.
+            const chart = new St.DrawingArea({
+                style_class: 'ai-usage-barchart',
+                x_expand: true,
+            });
+            const barColor = _hexToRgba('#3584e4');
+            chart.connect('repaint', area => {
+                const cr = area.get_context();
+                const w = area.width;
+                const h = area.height;
+                if (w <= 0 || h <= 0 || bars.length === 0) { cr.$dispose(); return; }
+
+                const gap = 3;
+                const barW = Math.max(2, (w - gap * (bars.length - 1)) / bars.length);
+
+                for (let i = 0; i < bars.length; i++) {
+                    const fraction = bars[i].value / maxVal;
+                    const barH = Math.max(1, Math.round((h - 14) * fraction));
+                    const x = i * (barW + gap);
+                    const y = h - 14 - barH;
+                    cr.setSourceRGBA(barColor[0], barColor[1], barColor[2], barColor[3]);
+                    cr.rectangle(x, y, barW, barH);
+                    cr.fill();
+                }
+                cr.$dispose();
+            });
+            parent.add_child(chart);
+
+            // X-axis labels row.
+            const labelRow = new St.BoxLayout({ x_expand: true, style_class: 'ai-usage-barchart-labels' });
+            for (const b of bars) {
+                labelRow.add_child(new St.Label({
+                    text: b.label,
+                    style_class: 'ai-usage-barchart-label',
+                    x_expand: true,
+                    x_align: Clutter.ActorAlign.CENTER,
+                }));
+            }
+            parent.add_child(labelRow);
         }
 
         _displayedValue(pctUsed, pctRemaining) {
