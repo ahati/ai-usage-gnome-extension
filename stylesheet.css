@@ -1,0 +1,29 @@
+/* CodexBar-style AI Usage Monitor — GNOME Shell Extension */
+
+/* ── Panel ── */
+
+.codexbar-panel-box {
+    spacing: 4px;
+    padding: 0 3px;
+}
+
+.codexbar-app-icon {
+    padding: 0;
+}
+
+/* ── Menu ── */
+
+.codexbar-header {
+    font-weight: bold;
+    font-size: 12px;
+    padding: 2px 0;
+    color: #e2e8f0;
+}
+
+.codexbar-provider-header {
+    font-weight: 600;
+    font-size: 11px;
+    padding: 6px 0 2px 0;
+    color: #a1a1aa;
+    letter-spacing: 0.3px;
+}

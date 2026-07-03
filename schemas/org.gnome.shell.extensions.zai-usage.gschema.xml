@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.zai-usage"
+          path="/org/gnome/shell/extensions/zai-usage/">
+
+    <!-- ====== Shared settings ====== -->
+
+    <key name="enabled-providers" type="as">
+      <default>['zai', 'openai', 'deepseek']</default>
+      <summary>Enabled providers</summary>
+      <description>List of provider IDs to fetch quota/balance data for. Supported: zai, openai, deepseek.</description>
+    </key>
+
+    <key name="refresh-interval" type="i">
+      <default>300</default>
+      <range min="30" max="3600"/>
+      <summary>Refresh Interval (seconds)</summary>
+      <description>How often to refresh usage data from all enabled providers (30-3600 seconds).</description>
+    </key>
+
+    <key name="show-percentage-in-panel" type="b">
+      <default>true</default>
+      <summary>Show percentage in panel</summary>
+      <description>Whether to show the usage percentage next to the icon in the top panel.</description>
+    </key>
+
+    <key name="high-usage-threshold" type="i">
+      <default>80</default>
+      <range min="50" max="100"/>
+      <summary>High usage warning threshold (%)</summary>
+      <description>Usage percentage above which the indicator turns orange.</description>
+    </key>
+
+    <key name="critical-usage-threshold" type="i">
+      <default>95</default>
+      <range min="60" max="100"/>
+      <summary>Critical usage threshold (%)</summary>
+      <description>Usage percentage above which the indicator turns red.</description>
+    </key>
+
+    <!-- ====== Z.AI (Zhipu / OpenCode Go) ====== -->
+
+    <key name="zai-api-key" type="s">
+      <default>''</default>
+      <summary>Z.AI API Key</summary>
+      <description>API key for Z.AI authentication. Get it from https://z.ai/manage-apikey</description>
+    </key>
+
+    <key name="zai-oauth-token" type="s">
+      <default>''</default>
+      <summary>Z.AI OAuth Access Token</summary>
+      <description>OAuth access token obtained via Z.AI OAuth login flow.</description>
+    </key>
+
+    <key name="zai-oauth-refresh" type="s">
+      <default>''</default>
+      <summary>Z.AI OAuth Refresh Token</summary>
+      <description>OAuth refresh token for obtaining new access tokens.</description>
+    </key>
+
+    <key name="zai-oauth-expiry" type="x">
+      <default>0</default>
+      <summary>Z.AI OAuth Token Expiry</summary>
+      <description>Unix timestamp when the OAuth access token expires.</description>
+    </key>
+
+    <key name="zai-endpoint" type="s">
+      <default>'intl'</default>
+      <summary>Z.AI API Endpoint</summary>
+      <description>API endpoint: 'intl' for api.z.ai (international) or 'cn' for open.bigmodel.cn (China mainland).</description>
+    </key>
+
+    <!-- ====== OpenAI (ChatGPT) ====== -->
+
+    <key name="openai-oauth-token" type="s">
+      <default>''</default>
+      <summary>OpenAI OAuth Access Token</summary>
+      <description>OAuth access token for OpenAI API. Can be extracted from browser session or OpenCode auth.json.</description>
+    </key>
+
+    <key name="openai-oauth-refresh" type="s">
+      <default>''</default>
+      <summary>OpenAI OAuth Refresh Token</summary>
+      <description>OAuth refresh token for obtaining new access tokens.</description>
+    </key>
+
+    <key name="openai-oauth-expiry" type="x">
+      <default>0</default>
+      <summary>OpenAI OAuth Token Expiry</summary>
+      <description>Unix timestamp when the OAuth access token expires.</description>
+    </key>
+
+    <!-- ====== DeepSeek ====== -->
+
+    <key name="deepseek-api-key" type="s">
+      <default>''</default>
+      <summary>DeepSeek API Key</summary>
+      <description>API key for DeepSeek authentication. Get it from https://platform.deepseek.com/api_keys</description>
+    </key>
+
+    <!-- ====== OpenCode Go ====== -->
+
+    <key name="opencode-go-workspace-id" type="s">
+      <default>''</default>
+      <summary>OpenCode Go Workspace ID</summary>
+      <description>Your OpenCode Go workspace ID (found in the dashboard URL: /workspace/{id}/go).</description>
+    </key>
+
+    <key name="opencode-go-auth-cookie" type="s">
+      <default>''</default>
+      <summary>OpenCode Go Auth Cookie</summary>
+      <description>The 'auth' cookie value from your OpenCode browser session. Extract from browser DevTools.</description>
+    </key>
+
+  </schema>
+</schemalist>
