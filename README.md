@@ -1,76 +1,64 @@
-# Z.AI Usage Monitor — GNOME Shell Extension
+# AI Usage Monitor — GNOME Shell Extension
 
-Monitor your [Z.AI](https://z.ai) (Zhipu AI) GLM Coding Plan usage limits directly from the GNOME Shell top panel.
+Monitor usage limits and balances for multiple AI providers directly from the GNOME Shell top panel. Supports **Z.AI**, **OpenCode Go**, **OpenAI (ChatGPT)**, and **DeepSeek** — with multiple accounts per provider.
 
 ## Features
 
-- **Live usage display** — Shows your current session/token usage percentage in the top panel
-- **Color-coded alerts** — Green (normal), orange (high), red (critical) based on configurable thresholds
-- **Detailed popup menu** — View 5-hour token usage, weekly token usage, time limits, and reset times
-- **OAuth login** — Authenticate via the same OAuth flow used by ZCode CLI
-- **API key support** — Alternative authentication using a Z.AI API key
-- **Configurable refresh interval** — Set how often usage data is fetched (30s to 1hr)
+- **Multi-provider, multi-account** — Add unlimited accounts per provider, each fetched independently
+- **Live usage display** — Color-coded indicator (green/orange/red) in the top panel shows worst-case usage
+- **Progress bars** — Visual free/used quota bars with reset times for each usage window
+- **Provider tabs** — Switch between accounts with logos in the popup menu
+- **OAuth login** — Browser-based OAuth for Z.AI accounts
+- **API key support** — Direct API key authentication for Z.AI and DeepSeek
+- **Balance display** — DeepSeek account balance monitoring
+- **Configurable refresh interval** — 30s to 1hr
 
 ## Requirements
 
-- GNOME Shell 45, 46, 47, or 48
-- A Z.AI account with a [GLM Coding Plan](https://z.ai)
+- GNOME Shell 45–50
+- One or more accounts with a supported provider
 
 ## Installation
 
-### Method 1: Manual install
-
 ```bash
-# Clone or copy the extension
-cp -r zai-usage-extension ~/.local/share/gnome-shell/extensions/zai-usage-monitor@cowork.user
+cd ai-usage-extension
+./install.sh
 
-# Compile the GSettings schema
-glib-compile-schemas ~/.local/share/gnome-shell/extensions/zai-usage-monitor@cowork.user/schemas/
-
-# Restart GNOME Shell (X11) or log out and back in (Wayland)
-Alt+F2, type 'r', Enter
-
-# Enable the extension
-gnome-extensions enable zai-usage-monitor@cowork.user
-```
-
-### Method 2: Quick install script
-
-```bash
-cd zai-usage-extension
-./install.sh   # (if provided)
+# Restart GNOME Shell (X11: Alt+F2 → r → Enter; Wayland: log out and back in)
+gnome-extensions enable ai-usage-monitor@ahati
 ```
 
 ## Usage
 
-1. After enabling the extension, click the system icon (default: gear icon) in the top panel
-2. Open **Preferences** from the menu
-3. Choose your authentication method:
-   - **API Key**: Enter your key from [z.ai/manage-apikey](https://z.ai/manage-apikey)
-   - **OAuth Login**: Click "Log In with Z.AI" and authenticate in your browser
-4. The panel will update automatically
+1. Click the indicator icon in the top panel
+2. Open **Preferences** → **Accounts** tab
+3. Click **Add Account**, choose a provider, and enter credentials:
+   - **Z.AI**: API key (from [z.ai/manage-apikey](https://z.ai/manage-apikey)) or OAuth login
+   - **OpenCode Go**: Workspace ID + auth cookie (from browser DevTools)
+   - **OpenAI**: OAuth access token
+   - **DeepSeek**: API key (from [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys))
+4. The panel updates automatically
 
 ## Configuration
 
-All settings are available in the Preferences dialog:
-
 | Setting | Description | Default |
 |---------|-------------|---------|
-| Endpoint | API region (International / China) | International |
-| API Key | Direct API key authentication | — |
-| Refresh interval | How often to fetch usage data | 300s |
-| Show percentage | Display % in the top panel | Enabled |
+| Display mode | Show "used" or "remaining" quota | Used |
+| Show logos | Provider logos on tabs | Enabled |
 | High threshold | % for orange warning | 80% |
 | Critical threshold | % for red alert | 95% |
+| Refresh interval | How often to fetch data | 300s |
 
-## API Endpoints Used
+Account credentials are stored in `~/.local/share/.ai-usage-ext/config.json`.
 
-- `GET /api/monitor/usage/quota/limit` — Fetches token/time usage limits
-- `POST /oauth/cli/init` — Initiates OAuth flow
-- `GET /oauth/cli/poll/{flow_id}` — Polls OAuth login status
+## Supported Providers
 
-> These endpoints are used internally by the Z.AI subscription management UI.
-> They work with both OAuth tokens and API keys.
+| Provider | Auth | Data |
+|----------|------|------|
+| Z.AI | API key / OAuth | Token & time usage limits |
+| OpenCode Go | Workspace ID + cookie | Rolling/weekly/monthly usage |
+| OpenAI | OAuth token | Usage windows + credits |
+| DeepSeek | API key | Account balance |
 
 ## License
 

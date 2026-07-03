@@ -3,7 +3,7 @@
 # Usage: ./dev-reload.sh
 set -e
 
-UUID="zai-usage-monitor@cowork.user"
+UUID="ai-usage-monitor@ahati"
 EXT_DIR="${HOME}/.local/share/gnome-shell/extensions/${UUID}"
 
 rm -rf "${EXT_DIR}"

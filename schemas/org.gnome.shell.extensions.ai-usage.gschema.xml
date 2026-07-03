@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
-  <schema id="org.gnome.shell.extensions.zai-usage"
-          path="/org/gnome/shell/extensions/zai-usage/">
+  <schema id="org.gnome.shell.extensions.ai-usage"
+          path="/org/gnome/shell/extensions/ai-usage/">
 
     <!-- ====== General UI settings ====== -->
     <!-- Provider accounts/credentials are stored in

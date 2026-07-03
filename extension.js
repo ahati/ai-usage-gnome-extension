@@ -83,7 +83,7 @@ const Indicator = GObject.registerClass(
             /* ── Panel: gauge icon, colored by usage severity ── */
             this._panelIcon = new St.Icon({
                 icon_name: 'stopwatch-symbolic',
-                style_class: 'codexbar-panel-icon',
+                style_class: 'ai-usage-panel-icon',
             });
             this.add_child(this._panelIcon);
 
@@ -96,16 +96,16 @@ const Indicator = GObject.registerClass(
         }
 
         _buildMenu() {
-            this.menu.box.add_style_class_name('codexbar-popup');
+            this.menu.box.add_style_class_name('ai-usage-popup');
 
             // Header row
             this._headerBox = new St.BoxLayout({
-                style_class: 'codexbar-header',
+                style_class: 'ai-usage-header',
                 x_expand: true,
             });
             this._headerTitle = new St.Label({
                 text: 'AI Usage',
-                style_class: 'codexbar-header-title',
+                style_class: 'ai-usage-header-title',
                 x_expand: true,
                 y_align: Clutter.ActorAlign.CENTER,
             });
@@ -129,13 +129,13 @@ const Indicator = GObject.registerClass(
 
             // Provider tabs row
             this._tabsContainer = new St.BoxLayout({
-                style_class: 'codexbar-tabs-container',
+                style_class: 'ai-usage-tabs-container',
             });
             this.menu.box.add_child(this._tabsContainer);
 
             // Content area
             this._contentBox = new St.BoxLayout({
-                style_class: 'codexbar-usage-section',
+                style_class: 'ai-usage-usage-section',
                 vertical: true,
             });
             this.menu.box.add_child(this._contentBox);
@@ -143,12 +143,12 @@ const Indicator = GObject.registerClass(
 
         _iconButton(iconName) {
             const btn = new St.Button({
-                style_class: 'codexbar-header-button',
+                style_class: 'ai-usage-header-button',
                 can_focus: true,
             });
             btn.set_child(new St.Icon({
                 icon_name: iconName,
-                style_class: 'codexbar-header-button-icon',
+                style_class: 'ai-usage-header-button-icon',
             }));
             return btn;
         }
@@ -191,7 +191,7 @@ const Indicator = GObject.registerClass(
 
             for (const { account, provider } of accounts) {
                 const btn = new St.Button({
-                    style_class: 'codexbar-tab',
+                    style_class: 'ai-usage-tab',
                     can_focus: true,
                 });
                 const inner = new St.BoxLayout({ y_align: Clutter.ActorAlign.CENTER });
@@ -205,7 +205,7 @@ const Indicator = GObject.registerClass(
                 }));
                 btn.set_child(inner);
                 if (account.id === this._activeAccountId)
-                    btn.add_style_class_name('codexbar-tab-active');
+                    btn.add_style_class_name('ai-usage-tab-active');
                 btn.connect('clicked', () => {
                     this._activeAccountId = account.id;
                     this._renderTabs();
@@ -224,8 +224,8 @@ const Indicator = GObject.registerClass(
             if (!GLib.file_test(path, GLib.FileTest.EXISTS)) return null;
             try {
                 const cls = provider.fullColorLogo
-                    ? 'codexbar-tab-icon-color'
-                    : 'codexbar-tab-icon';
+                    ? 'ai-usage-tab-icon-color'
+                    : 'ai-usage-tab-icon';
                 return new St.Icon({
                     gicon: Gio.Icon.new_for_string(path),
                     style_class: cls,
@@ -288,11 +288,11 @@ const Indicator = GObject.registerClass(
 
                 const freeColor = usageColor(this._displayedValue(pctUsed, pctRemaining), this._settings);
                 const track = new St.BoxLayout({
-                    style_class: 'codexbar-progress-container',
+                    style_class: 'ai-usage-progress-container',
                 });
                 if (pctRemaining > 0) {
                     track.add_child(new St.Widget({
-                        style_class: 'codexbar-progress-free',
+                        style_class: 'ai-usage-progress-free',
                         // When there's no used segment, expand to fill the track;
                         // otherwise use a fixed width so the used segment gets the rest.
                         x_expand: pctUsed === 0,
@@ -302,7 +302,7 @@ const Indicator = GObject.registerClass(
                 }
                 if (pctUsed > 0) {
                     track.add_child(new St.Widget({
-                        style_class: 'codexbar-progress-used',
+                        style_class: 'ai-usage-progress-used',
                         x_expand: true,
                     }));
                 }
@@ -314,7 +314,7 @@ const Indicator = GObject.registerClass(
                     : `${Math.round(pctUsed)}% used`;
                 stats.add_child(new St.Label({
                     text: leftText,
-                    style_class: 'codexbar-usage-subtitle',
+                    style_class: 'ai-usage-usage-subtitle',
                     x_expand: true,
                 }));
                 const detail = [];
@@ -323,14 +323,14 @@ const Indicator = GObject.registerClass(
                 if (detail.length)
                     stats.add_child(new St.Label({
                         text: detail.join(', '),
-                        style_class: 'codexbar-usage-subtitle codexbar-usage-subtitle-right',
+                        style_class: 'ai-usage-usage-subtitle ai-usage-usage-subtitle-right',
                     }));
                 parent.add_child(stats);
             } else {
                 this._addTitle(parent, e.label || 'Value');
                 parent.add_child(new St.Label({
                     text: e.value ?? '?',
-                    style_class: 'codexbar-usage-subtitle',
+                    style_class: 'ai-usage-usage-subtitle',
                 }));
             }
         }
@@ -343,14 +343,14 @@ const Indicator = GObject.registerClass(
         _addTitle(parent, text) {
             parent.add_child(new St.Label({
                 text,
-                style_class: 'codexbar-usage-title',
+                style_class: 'ai-usage-usage-title',
             }));
         }
 
         _addHint(parent, text) {
             parent.add_child(new St.Label({
                 text,
-                style_class: 'codexbar-usage-subtitle codexbar-hint',
+                style_class: 'ai-usage-usage-subtitle ai-usage-hint',
             }));
         }
 
@@ -453,7 +453,7 @@ const Indicator = GObject.registerClass(
     }
 );
 
-export default class ZaiUsageExtension extends Extension {
+export default class AiUsageExtension extends Extension {
     enable() {
         this._indicator = new Indicator(this);
         Main.panel.addToStatusArea(this.uuid, this._indicator, 1, 'right');

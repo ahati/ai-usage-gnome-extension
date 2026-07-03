@@ -1,4 +1,4 @@
-/* Z.AI Usage Monitor - Preferences Dialog
+/* AI Usage Monitor - Preferences Dialog
  *
  * Multi-account preferences. Account credentials are stored in a JSON
  * config file (see config.js). General UI settings stay in gsettings.
@@ -20,7 +20,7 @@ const PROVIDER_INFO = {
     deepseek: { name: 'DeepSeek' },
 };
 
-export default class ZaiUsagePreferences extends ExtensionPreferences {
+export default class AiUsagePreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
 

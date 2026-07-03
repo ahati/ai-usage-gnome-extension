@@ -1,7 +1,7 @@
 {
   "name": "AI Usage Monitor",
   "description": "Monitor AI service usage limits and balances. Supports Z.AI, OpenCode Go, OpenAI, and DeepSeek.",
-  "uuid": "zai-usage-monitor@cowork.user",
+  "uuid": "ai-usage-monitor@ahati",
   "shell-version": [
     "45",
     "46",
@@ -11,7 +11,7 @@
     "50"
   ],
   "version": 1,
-  "settings-schema": "org.gnome.shell.extensions.zai-usage",
+  "settings-schema": "org.gnome.shell.extensions.ai-usage",
   "url": "https://z.ai",
-  "gettext-domain": "zai-usage-monitor"
+  "gettext-domain": "ai-usage-monitor"
 }

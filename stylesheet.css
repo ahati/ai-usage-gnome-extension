@@ -1,67 +1,67 @@
-/* CodexBar-style AI Usage Monitor — GNOME Shell Extension */
+/* AI Usage Monitor — GNOME Shell Extension */
 
 /* ── Panel ── */
 
-.codexbar-panel-icon {
+.ai-usage-panel-icon {
     icon-size: 16px;
     -st-icon-style: symbolic;
 }
 
 /* ── Popup ── */
 
-.codexbar-popup {
+.ai-usage-popup {
     min-width: 320px;
 }
 
 /* Header row */
-.codexbar-header {
+.ai-usage-header {
     padding: 10px;
     spacing: 4px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.codexbar-header-title {
+.ai-usage-header-title {
     font-weight: bold;
     font-size: 1.05em;
     color: #eeeeee;
 }
 
-.codexbar-header-button {
+.ai-usage-header-button {
     padding: 4px;
     border-radius: 4px;
     margin-left: 5px;
 }
 
-.codexbar-header-button:hover {
+.ai-usage-header-button:hover {
     background-color: rgba(255, 255, 255, 0.1);
 }
 
-.codexbar-header-button-icon {
+.ai-usage-header-button-icon {
     icon-size: 16px;
 }
 
 /* Provider tabs */
-.codexbar-tabs-container {
+.ai-usage-tabs-container {
     padding: 10px;
     spacing: 5px;
 }
 
-.codexbar-tab {
+.ai-usage-tab {
     padding: 5px 10px;
     border-radius: 8px;
     margin-right: 5px;
 }
 
-.codexbar-tab:hover {
+.ai-usage-tab:hover {
     background-color: rgba(255, 255, 255, 0.07);
 }
 
-.codexbar-tab-active {
+.ai-usage-tab-active {
     background-color: rgba(255, 255, 255, 0.15);
     font-weight: bold;
 }
 
-.codexbar-tab-icon {
+.ai-usage-tab-icon {
     margin-right: 6px;
     icon-size: 16px;
     color: white;
@@ -70,41 +70,41 @@
 
 /* Full-color brand logos: keep original colors, don't force symbolic.
    Self-contained (no -st-icon-style, no forced color) so fills render as-is. */
-.codexbar-tab-icon-color {
+.ai-usage-tab-icon-color {
     margin-right: 6px;
     icon-size: 16px;
 }
 
 /* Usage content */
-.codexbar-usage-section {
+.ai-usage-usage-section {
     padding: 12px 15px 15px 15px;
     spacing: 4px;
 }
 
-.codexbar-usage-title {
+.ai-usage-usage-title {
     font-size: 0.9em;
     font-weight: bold;
     margin-bottom: 5px;
     color: #eeeeee;
 }
 
-.codexbar-usage-subtitle {
+.ai-usage-usage-subtitle {
     font-size: 0.8em;
     color: #aaaaaa;
     margin-bottom: 8px;
 }
 
-.codexbar-usage-subtitle-right {
+.ai-usage-usage-subtitle-right {
     text-align: right;
 }
 
-.codexbar-hint {
+.ai-usage-hint {
     color: #8a8a8a;
     font-style: italic;
 }
 
 /* Progress bars: full-width track split into free (left, colored) + used (right, gray) */
-.codexbar-progress-container {
+.ai-usage-progress-container {
     height: 6px;
     width: 290px;
     background-color: rgba(255, 255, 255, 0.1);
@@ -114,13 +114,13 @@
 }
 
 /* Free/remaining quota — left segment, colored by usage severity (inline) */
-.codexbar-progress-free {
+.ai-usage-progress-free {
     height: 6px;
     background-color: #2ec27e; /* green; overridden inline */
 }
 
 /* Used quota — right segment, gray, fills the rest of the track */
-.codexbar-progress-used {
+.ai-usage-progress-used {
     height: 6px;
     background-color: rgba(255, 255, 255, 0.25);
 }

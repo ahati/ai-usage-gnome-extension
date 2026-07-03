@@ -25,7 +25,7 @@ gnome-shell --help 2>&1 | grep devkit
 dbus-run-session gnome-shell --devkit --wayland
 
 # 3. In another terminal, enable the extension inside the nested session
-gnome-extensions enable zai-usage-monitor@cowork.user
+gnome-extensions enable ai-usage-monitor@ahati
 
 # 4. Test — click the panel indicator, check menu, verify data
 
@@ -34,7 +34,7 @@ gnome-extensions enable zai-usage-monitor@cowork.user
 # 6. Re-install and restart nested shell
 ./install.sh
 # Close nested shell window and relaunch dbus-run-session gnome-shell --devkit --wayland
-gnome-extensions enable zai-usage-monitor@cowork.user
+gnome-extensions enable ai-usage-monitor@ahati
 
 # 7. Repeat from step 4
 ```
@@ -46,7 +46,7 @@ Save as `dev-reload.sh`:
 ```bash
 #!/bin/bash
 # Reload extension in nested shell — run from project root
-UUID="zai-usage-monitor@cowork.user"
+UUID="ai-usage-monitor@ahati"
 EXT_DIR="${HOME}/.local/share/gnome-shell/extensions/${UUID}"
 
 set -e
@@ -99,7 +99,7 @@ log(`[ai-usage] ${provider.id}: result=${JSON.stringify(result)}`);
 ### 4c. Check extension state via DBus
 
 ```bash
-UUID="zai-usage-monitor@cowork.user"
+UUID="ai-usage-monitor@ahati"
 
 # Get full extension info (state, enabled, error)
 busctl --user call org.gnome.Shell /org/gnome/Shell \
@@ -126,12 +126,12 @@ busctl --user call org.gnome.Shell /org/gnome/Shell \
 
 ```bash
 # Test Z.AI API
-API_KEY=$(gsettings get org.gnome.shell.extensions.zai-usage zai-api-key | tr -d "'")
+API_KEY=$(gsettings get org.gnome.shell.extensions.ai-usage zai-api-key | tr -d "'")
 curl -s -H "Authorization: Bearer $API_KEY" \
     "https://api.z.ai/api/monitor/usage/quota/limit" | python3 -m json.tool
 
 # Test DeepSeek API
-DS_KEY=$(gsettings get org.gnome.shell.extensions.zai-usage deepseek-api-key | tr -d "'")
+DS_KEY=$(gsettings get org.gnome.shell.extensions.ai-usage deepseek-api-key | tr -d "'")
 curl -s -H "Authorization: Bearer $DS_KEY" \
     "https://api.deepseek.com/user/balance" | python3 -m json.tool
 ```
@@ -139,7 +139,7 @@ curl -s -H "Authorization: Bearer $DS_KEY" \
 ### 4e. Check GSettings
 
 ```bash
-SCHEMA="org.gnome.shell.extensions.zai-usage"
+SCHEMA="org.gnome.shell.extensions.ai-usage"
 
 # List all keys and values
 gsettings list-recursively "$SCHEMA"
@@ -161,7 +161,7 @@ gsettings set "$SCHEMA" refresh-interval 60
 gdbus call --session --dest org.gnome.Shell.Extensions \
     --object-path /org/gnome/Shell/Extensions \
     --method org.gnome.Shell.Extensions.OpenExtensionPrefs \
-    "zai-usage-monitor@cowork.user" "" '{}'
+    "ai-usage-monitor@ahati" "" '{}'
 
 # Force refresh (indirectly by triggering preferences)
 # The extension has a "Refresh" button in the menu
@@ -173,7 +173,7 @@ gdbus call --session --dest org.gnome.Shell.Extensions \
 # List all menu items for the extension
 busctl --user call org.gnome.Shell /org/gnome/Shell \
     org.gnome.Shell.Extensions ListExtensions \
-    | grep -o '"zai-usage[^"]*"[^}]*}' | python3 -c "
+    | grep -o '"ai-usage[^"]*"]*"[^}]*}' | python3 -c "
 import sys, re
 text = sys.stdin.read()
 for key in ['name', 'state', 'enabled', 'error']:
@@ -186,13 +186,13 @@ for key in ['name', 'state', 'enabled', 'error']:
 ### Check which providers are enabled
 
 ```bash
-gsettings get org.gnome.shell.extensions.zai-usage enabled-providers
+gsettings get org.gnome.shell.extensions.ai-usage enabled-providers
 ```
 
 ### Check if a provider has auth configured
 
 ```bash
-SCHEMA="org.gnome.shell.extensions.zai-usage"
+SCHEMA="org.gnome.shell.extensions.ai-usage"
 for key in zai-api-key opencode-go-workspace-id openai-oauth-token deepseek-api-key; do
     VAL=$(gsettings get "$SCHEMA" "$key")
     if [ "$VAL" = "''" ] || [ -z "$VAL" ]; then
@@ -211,7 +211,7 @@ import { zaiProvider } from './providers/zai.js';
 const Gio = imports.gi.Gio;
 const Soup = imports.gi.Soup;
 const schema = Gio.SettingsSchemaSource.get_default()
-    .lookup('org.gnome.shell.extensions.zai-usage', true);
+    .lookup('org.gnome.shell.extensions.ai-usage', true);
 const settings = new Gio.Settings({settings_schema: schema});
 const session = new Soup.Session();
 const result = await zaiProvider.fetch(session, settings);
@@ -235,7 +235,7 @@ print(JSON.stringify(result, null, 2));
 ## 7. File layout for debugging
 
 ```
-~/.local/share/gnome-shell/extensions/zai-usage-monitor@cowork.user/
+~/.local/share/gnome-shell/extensions/ai-usage-monitor@ahati/
 ├── extension.js          ← Main extension logic
 ├── prefs.js              ← Preferences dialog
 ├── stylesheet.css        ← Panel/menu styling
@@ -246,6 +246,6 @@ print(JSON.stringify(result, null, 2));
 │   ├── openai.js         ← ChatGPT usage API
 │   └── deepseek.js       ← DeepSeek balance API
 └── schemas/
-    ├── org.gnome.shell.extensions.zai-usage.gschema.xml
+    ├── org.gnome.shell.extensions.ai-usage.gschema.xml
     └── gschemas.compiled
 ```
