@@ -9,6 +9,7 @@
 
 import Soup from 'gi://Soup?version=3.0';
 import GLib from 'gi://GLib';
+import { MODEL_COLORS, modelColor } from './colors.js';
 
 const ZAI_ENDPOINTS = {
     intl: {
@@ -24,48 +25,6 @@ const ZAI_ENDPOINTS = {
         oauthPoll: 'https://open.bigmodel.cn/oauth/cli/poll',
     },
 };
-
-/* 32-color preset for model series. Assigned by index in sortOrder, so the
- * same model gets the same color across the 24h / 30d charts within a session.
- * Tuned for distinguishability on a dark popup background. */
-const MODEL_COLORS = [
-    '#3584e4', // 1  blue
-    '#9141ac', // 2  purple
-    '#26a269', // 3  teal
-    '#e01b24', // 4  red
-    '#986a44', // 5  brown
-    '#f6d32d', // 6  yellow
-    '#ff7800', // 7  orange
-    '#33d17a', // 8  light green
-    '#1c71d8', // 9  darker blue
-    '#813d9c', // 10 dark purple
-    '#1a5fb4', // 11 navy
-    '#c01c28', // 12 dark red
-    '#7a8c2e', // 13 olive
-    '#e5a50a', // 14 amber
-    '#ed333b', // 15 bright red
-    '#62a0ea', // 16 light blue
-    '#c8557e', // 17 pink
-    '#5e8a4e', // 18 forest green
-    '#d48b3a', // 19 tan
-    '#4a86b8', // 20 steel blue
-    '#b161c4', // 21 light purple
-    '#2e859a', // 22 cyan
-    '#c04a6c', // 23 rose
-    '#8a6d3b', // 24 dark tan
-    '#5f3c8e', // 25 indigo
-    '#3a8f5f', // 26 emerald
-    '#b8542a', // 27 rust
-    '#6987c4', // 28 periwinkle
-    '#a04668', // 29 maroon
-    '#4d6b8a', // 30 slate
-    '#9c6b3f', // 31 copper
-    '#5a7d3a', // 32 moss
-];
-
-function modelColor(modelName, index) {
-    return MODEL_COLORS[index % MODEL_COLORS.length];
-}
 
 /* Format a Date as "YYYY-MM-DD HH:MM:SS" in the local timezone — the format
  * the model-usage endpoint expects for startTime/endTime. */
@@ -303,7 +262,7 @@ export const zaiProvider = {
             if (!current || gridHours.has(hr)) {
                 if (current) grouped.push(current);
                 current = {
-                    label: xLabelHourly(xTime[i], true),
+                    label: xLabelPeakBucket(xTime[i]),
                     startDate: xTime[i],
                     hour: hr,
                     totalCalls: 0,
@@ -460,6 +419,16 @@ function xLabelDaily(s) {
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
     if (!m) return s;
     return `${m[2]}/${m[3]}`;   // MM/DD — short for the dense 30-bar chart
+}
+
+/* Label for a 4h peak bucket in the 7d chart. Each day has 6 buckets, so we
+ * show the day + the bucket's start hour (e.g. "28 14h"). For empty/sparse
+ * days this keeps the buckets distinguishable across the 7-day span, unlike
+ * plain xLabelHourly which would repeat "14h" every day. */
+function xLabelPeakBucket(s) {
+    const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):/.exec(s);
+    if (!m) return xLabelHourly(s, true);
+    return `${m[3]} ${m[4]}h`;   // DD HHh — e.g. "28 14h"
 }
 
 /* Extract the UTC+8 hour-of-day from an "YYYY-MM-DD HH:MM" label. */

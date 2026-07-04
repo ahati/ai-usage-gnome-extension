@@ -109,6 +109,11 @@
     margin-bottom: 8px;
 }
 
+/* Cost-distribution bar (wider, rounded corners via the DrawingArea paint) */
+.ai-usage-cost-dist-bar {
+    height: 22px;
+}
+
 /* Bar chart: St.DrawingArea for token usage history */
 .ai-usage-barchart {
     height: 60px;
@@ -125,11 +130,15 @@
     color: #888888;
 }
 
-/* Stacked bar chart legend (model color-coding) */
-.ai-usage-legend {
-    spacing: 10px;
+/* Stacked bar chart legend (model color-coding) — wrapping flow layout */
+.ai-usage-legend-flow {
+    spacing: 4px;
     margin-top: 6px;
     margin-bottom: 8px;
+}
+
+.ai-usage-legend-row {
+    spacing: 10px;
 }
 
 .ai-usage-legend-swatch {

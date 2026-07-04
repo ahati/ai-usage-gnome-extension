@@ -255,6 +255,8 @@ export default class AiUsagePreferences extends ExtensionPreferences {
                 this._updateAccount(acc.id, a => { a.credentials.workspaceId = val; })));
             row.add_row(this._entryRow(_('Auth Cookie'), c.authCookie || '', true, val =>
                 this._updateAccount(acc.id, a => { a.credentials.authCookie = val; })));
+            row.add_row(this._entryRow(_('Server ID (x-server-id)'), c.serverId || '', false, val =>
+                this._updateAccount(acc.id, a => { a.credentials.serverId = val; })));
         }
 
         if (acc.provider === 'openai') {
@@ -320,7 +322,7 @@ export default class AiUsagePreferences extends ExtensionPreferences {
         if (provider === 'zai') return { apiKey: '', oauthToken: '', oauthRefresh: '', oauthExpiry: 0, endpoint: 'intl' };
         if (provider === 'openai') return { oauthToken: '', oauthRefresh: '', oauthExpiry: 0 };
         if (provider === 'deepseek') return { apiKey: '' };
-        if (provider === 'opencode-go') return { workspaceId: '', authCookie: '' };
+        if (provider === 'opencode-go') return { workspaceId: '', authCookie: '', serverId: '' };
         return {};
     }
 

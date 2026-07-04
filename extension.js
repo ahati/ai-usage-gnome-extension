@@ -57,6 +57,16 @@ function fmtNum(n) {
     return String(n);
 }
 
+/* Format raw OpenCode Go cost units as dollars. Calibrated against the
+ * dashboard: cost:374228 → $0.0037, divisor ≈ 101,142,703. */
+const OCG_COST_DIVISOR = 101142703;
+function fmtCost(rawCost) {
+    const dollars = rawCost / OCG_COST_DIVISOR;
+    if (dollars >= 100) return `$${dollars.toFixed(0)}`;
+    if (dollars >= 1) return `$${dollars.toFixed(2)}`;
+    return `$${dollars.toFixed(3)}`;
+}
+
 function fmtReset(iso) {
     if (!iso) return '';
     const d = new Date(iso) - Date.now();
@@ -372,6 +382,8 @@ const Indicator = GObject.registerClass(
                 this._addBarChart(parent, e);
             } else if (e.kind === 'stackedbarchart') {
                 this._addStackedBarChart(parent, e);
+            } else if (e.kind === 'costdistribution') {
+                this._addCostDistribution(parent, e);
             } else if (e.kind === 'peakstatus') {
                 this._addPeakStatus(parent, e);
             } else {
@@ -543,22 +555,12 @@ const Indicator = GObject.registerClass(
             }
             parent.add_child(labelRow);
 
-            // Optional legend (e.g. peak vs off-peak split).
-            if (e.legend) {
-                const legendRow = new St.BoxLayout({
-                    x_expand: true,
-                    style_class: 'ai-usage-legend',
-                });
-                for (const item of e.legend) {
-                    legendRow.add_child(this._legendSwatch(item.color));
-                    legendRow.add_child(new St.Label({
-                        text: item.label,
-                        style_class: 'ai-usage-legend-label',
-                        y_align: Clutter.ActorAlign.CENTER,
-                    }));
-                }
-                parent.add_child(legendRow);
-            }
+            // Optional legend (e.g. peak vs off-peak split, or model colors
+            // for the rolling-50 chart). Items may use either {color,label}
+            // (peak) or {name,color,total} (models) — wrapped into a flow
+            // layout so many models don't force the popup wider.
+            if (e.legend)
+                this._addLegendFlow(parent, e.legend, e.unit);
         }
 
         /* Peak-hours traffic-light: a colored circle (red = currently peak,
@@ -566,6 +568,57 @@ const Indicator = GObject.registerClass(
          * countdown is recomputed every 60s while the menu is open via a
          * dedicated ticker (this._peakTickerId) that touches only these
          * widgets — it does not refetch or re-render the menu. */
+        /* Horizontal cost-distribution bar: a single track split into colored
+         * segments, one per model. Segment width = that model's share of total
+         * cost over the last N requests. Shows the cost mix at a glance. */
+        _addCostDistribution(parent, e) {
+            const segments = e.segments || [];
+            if (segments.length === 0) return;
+            const total = segments.reduce((s, seg) => s + seg.value, 0) || 1;
+
+            this._addTitle(parent, e.label || 'Cost distribution');
+
+            const bar = new St.DrawingArea({
+                style_class: 'ai-usage-progress-bar ai-usage-cost-dist-bar',
+                x_expand: true,
+            });
+            bar.connect('repaint', area => {
+                const cr = area.get_context();
+                const w = area.width;
+                const h = area.height;
+                if (w <= 0 || h <= 0) { cr.$dispose(); return; }
+
+                let x = 0;
+                for (const seg of segments) {
+                    const segW = Math.round(w * seg.value / total);
+                    if (segW <= 0) continue;
+                    const rgba = _hexToRgba(seg.color);
+                    cr.setSourceRGBA(rgba[0], rgba[1], rgba[2], rgba[3]);
+                    cr.rectangle(x, 0, segW, h);
+                    cr.fill();
+                    x += segW;
+                }
+                cr.$dispose();
+            });
+            parent.add_child(bar);
+
+            // Total cost subtitle on the right.
+            const stats = new St.BoxLayout({ x_expand: true });
+            stats.add_child(new St.Label({
+                text: `${segments.length} models`,
+                style_class: 'ai-usage-usage-subtitle',
+                x_expand: true,
+            }));
+            stats.add_child(new St.Label({
+                text: `total ${fmtCost(e.totalCost)}`,
+                style_class: 'ai-usage-usage-subtitle ai-usage-usage-subtitle-right',
+            }));
+            parent.add_child(stats);
+
+            // Flow legend (model swatch + cost).
+            this._addLegendFlow(parent, e.legend, e.unit);
+        }
+
         _addPeakStatus(parent, e) {
             const row = new St.BoxLayout({
                 style_class: 'ai-usage-peak-status',
@@ -681,22 +734,48 @@ const Indicator = GObject.registerClass(
             }
             parent.add_child(labelRow);
 
-            // Legend: color swatch + "MODEL total" per model.
-            if (legend.length > 0) {
-                const legendRow = new St.BoxLayout({
+            // Legend: color swatch + "MODEL total" per model, wrapped into a
+            // multi-row flow so the popup stays narrow with many models.
+            if (legend.length > 0)
+                this._addLegendFlow(parent, legend, e.unit);
+        }
+
+        /* Build the text for a legend entry, accounting for unit. */
+        _legendLabel(m, unit) {
+            if (m.total === null || m.total === undefined) return m.name;
+            if (unit === 'cost') return `${m.name} ${fmtCost(m.total)}`;
+            return `${m.name} ${fmtNum(m.total)}`;
+        }
+
+        /* Render a legend as a wrapping flow layout: items are packed into
+         * horizontal rows of at most `perRow` swatch+label pairs, then rows
+         * stack vertically. This keeps the popup width bounded when there are
+         * many models (OpenCode Go workspaces can expose 15+). */
+        _addLegendFlow(parent, items, unit, perRow = 4) {
+            if (!items || items.length === 0) return;
+            const container = new St.BoxLayout({
+                style_class: 'ai-usage-legend-flow',
+                vertical: true,
+                x_expand: true,
+            });
+            for (let i = 0; i < items.length; i += perRow) {
+                const row = new St.BoxLayout({
+                    style_class: 'ai-usage-legend-row',
                     x_expand: true,
-                    style_class: 'ai-usage-legend',
                 });
-                for (const m of legend) {
-                    legendRow.add_child(this._legendSwatch(m.color));
-                    legendRow.add_child(new St.Label({
-                        text: `${m.name} ${fmtNum(m.total)}`,
+                for (let j = i; j < Math.min(i + perRow, items.length); j++) {
+                    const item = items[j];
+                    row.add_child(this._legendSwatch(item.color));
+                    const text = item.label ?? this._legendLabel(item, unit);
+                    row.add_child(new St.Label({
+                        text,
                         style_class: 'ai-usage-legend-label',
                         y_align: Clutter.ActorAlign.CENTER,
                     }));
                 }
-                parent.add_child(legendRow);
+                container.add_child(row);
             }
+            parent.add_child(container);
         }
 
         _legendSwatch(color) {
