@@ -15,7 +15,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import * as config from './config.js';
-import { zaiProvider } from './providers/zai.js';
+import { zaiProvider, currentPeakStatus } from './providers/zai.js';
 import { opencodeGoProvider } from './providers/opencode-go.js';
 import { openaiProvider } from './providers/openai.js';
 import { deepseekProvider } from './providers/deepseek.js';
@@ -68,6 +68,18 @@ function fmtReset(iso) {
     return `resets ${Math.floor(h / 24)}d ${h % 24}h`;
 }
 
+/* Format milliseconds as a compact H:MM:SS or MM:SS countdown, for the
+ * live peak-status indicator. */
+function fmtHMS(ms) {
+    if (ms <= 0) return 'now';
+    const totalSec = Math.floor(ms / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    const pad = n => String(n).padStart(2, '0');
+    return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
 function usageColor(displayed, settings) {
     if (displayed === null || displayed === undefined) return COLOR_MUTED;
     const high = settings.get_int('high-usage-threshold');
@@ -102,6 +114,36 @@ const Indicator = GObject.registerClass(
             });
             this._setupConfigMonitor();
             this._scheduleRefresh();
+
+            /* Peak-status ticker: ticks every 1s while the menu is open so
+             * the traffic-light countdown stays live. Started on open, stopped
+             * on close — never runs with the menu hidden. */
+            this._peakWidgets = null;     // populated by _addPeakStatus
+            this._peakTickerId = 0;
+            this.menu.connect('open-state-changed', (menu, open) => {
+                if (open) this._startPeakTicker();
+                else this._stopPeakTicker();
+            });
+        }
+
+        _startPeakTicker() {
+            if (this._peakTickerId) return;
+            this._peakTickerId = GLib.timeout_add_seconds(
+                GLib.PRIORITY_DEFAULT, 1, () => {
+                    if (this._peakWidgets) {
+                        for (const u of this._peakWidgets) {
+                            try { u(); } catch (e) { log(`[ai-usage] peak tick: ${e}`); }
+                        }
+                    }
+                    return GLib.SOURCE_CONTINUE;
+                });
+        }
+
+        _stopPeakTicker() {
+            if (this._peakTickerId) {
+                GLib.source_remove(this._peakTickerId);
+                this._peakTickerId = 0;
+            }
         }
 
         _buildMenu() {
@@ -248,6 +290,9 @@ const Indicator = GObject.registerClass(
 
         _renderContent() {
             this._contentBox.destroy_all_children();
+            // Reset the peak-widget list so stale update closures (pointing at
+            // destroyed labels) don't fire from the ticker.
+            this._peakWidgets = [];
 
             const accounts = this._getAccounts();
             const active = accounts.find(a => a.account.id === this._activeAccountId);
@@ -300,51 +345,7 @@ const Indicator = GObject.registerClass(
                 // we paint directly at render time using the widget's actual
                 // allocated width, so proportions are always pixel-perfect
                 // regardless of CSS layout quirks.
-                const fillColor = usageColor(pctUsed, this._settings);
-                const fraction = pctRemaining / 100; // 1.0 = full, 0 = empty
-
-                const bar = new St.DrawingArea({
-                    style_class: 'ai-usage-progress-bar',
-                    x_expand: true,
-                });
-                bar.connect('repaint', area => {
-                    const cr = area.get_context();
-                    const w = area.width;
-                    const h = area.height;
-                    if (w <= 0 || h <= 0) { cr.$dispose(); return; }
-                    const radius = Math.min(h / 2, 6);
-
-                    // Translucent track background (rounded)
-                    cr.setSourceRGBA(1, 1, 1, 0.1);
-                    cr.newSubPath();
-                    cr.arc(w - radius, radius, radius, -Math.PI / 2, 0);
-                    cr.arc(w - radius, h - radius, radius, 0, Math.PI / 2);
-                    cr.arc(radius, h - radius, radius, Math.PI / 2, Math.PI);
-                    cr.arc(radius, radius, radius, Math.PI, 3 * Math.PI / 2);
-                    cr.closePath();
-                    cr.fill();
-
-                    // Colored fill (left-aligned, width = fraction of track, rounded)
-                    if (fraction > 0) {
-                        const fillW = Math.round(w * fraction);
-                        const rgba = _hexToRgba(fillColor);
-                        cr.setSourceRGBA(rgba[0], rgba[1], rgba[2], rgba[3]);
-                        // Clip to track shape so fill corners follow the track
-                        cr.save();
-                        cr.newSubPath();
-                        cr.arc(w - radius, radius, radius, -Math.PI / 2, 0);
-                        cr.arc(w - radius, h - radius, radius, 0, Math.PI / 2);
-                        cr.arc(radius, h - radius, radius, Math.PI / 2, Math.PI);
-                        cr.arc(radius, radius, radius, Math.PI, 3 * Math.PI / 2);
-                        cr.closePath();
-                        cr.clip();
-                        cr.rectangle(0, 0, fillW, h);
-                        cr.fill();
-                        cr.restore();
-                    }
-                    cr.$dispose();
-                });
-                parent.add_child(bar);
+                this._addProgressBar(parent, pctUsed, pctRemaining);
 
                 const stats = new St.BoxLayout({ x_expand: true });
                 const leftText = this._settings.get_string('display-mode') === 'remaining'
@@ -364,14 +365,125 @@ const Indicator = GObject.registerClass(
                         style_class: 'ai-usage-usage-subtitle ai-usage-usage-subtitle-right',
                     }));
                 parent.add_child(stats);
-            } else if (e.kind === 'barchart') {
+
+                // Optional per-tool breakdown (e.g. Z.AI MCP tools).
+                if (e.breakdown) this._addBreakdown(parent, e.breakdown);
+            } else if (e.kind === 'barchart' || e.kind === 'peakbarchart') {
                 this._addBarChart(parent, e);
+            } else if (e.kind === 'stackedbarchart') {
+                this._addStackedBarChart(parent, e);
+            } else if (e.kind === 'peakstatus') {
+                this._addPeakStatus(parent, e);
             } else {
                 this._addTitle(parent, e.label || 'Value');
                 parent.add_child(new St.Label({
                     text: e.value ?? '?',
                     style_class: 'ai-usage-usage-subtitle',
                 }));
+            }
+        }
+
+        /* One horizontal progress bar. pctUsed/pctRemaining are 0–100.
+         * Used both for top-level entries and (via a fixed grey fill) inside
+         * the MCP breakdown. Returns the DrawingArea (already parented). */
+        _addProgressBar(parent, pctUsed, pctRemaining, fillColor = null) {
+            const fill = fillColor || usageColor(pctUsed, this._settings);
+            const fraction = clamp(pctRemaining) / 100; // 1.0 = full, 0 = empty
+
+            const bar = new St.DrawingArea({
+                style_class: 'ai-usage-progress-bar',
+                x_expand: true,
+            });
+            bar.connect('repaint', area => {
+                const cr = area.get_context();
+                const w = area.width;
+                const h = area.height;
+                if (w <= 0 || h <= 0) { cr.$dispose(); return; }
+                const radius = Math.min(h / 2, 6);
+
+                // Translucent track background (rounded)
+                cr.setSourceRGBA(1, 1, 1, 0.1);
+                this._roundedPath(cr, w, h, radius);
+                cr.fill();
+
+                // Colored fill (left-aligned, width = fraction of track, rounded)
+                if (fraction > 0) {
+                    const fillW = Math.round(w * fraction);
+                    const rgba = _hexToRgba(fill);
+                    cr.setSourceRGBA(rgba[0], rgba[1], rgba[2], rgba[3]);
+                    cr.save();
+                    this._roundedPath(cr, w, h, radius);
+                    cr.clip();
+                    cr.rectangle(0, 0, fillW, h);
+                    cr.fill();
+                    cr.restore();
+                }
+                cr.$dispose();
+            });
+            parent.add_child(bar);
+            return bar;
+        }
+
+        /* Paint a rounded-rectangle subpath covering the full widget area. */
+        _roundedPath(cr, w, h, radius) {
+            cr.newSubPath();
+            cr.arc(w - radius, radius, radius, -Math.PI / 2, 0);
+            cr.arc(w - radius, h - radius, radius, 0, Math.PI / 2);
+            cr.arc(radius, h - radius, radius, Math.PI / 2, Math.PI);
+            cr.arc(radius, radius, radius, Math.PI, 3 * Math.PI / 2);
+            cr.closePath();
+        }
+
+        /* MCP per-tool breakdown: one thin labelled bar per tool, fill = the
+         * tool's share of total MCP calls used this window. Empty window → all
+         * bars render as an empty track (no division by zero). */
+        _addBreakdown(parent, breakdown) {
+            const total = breakdown.total || 0;
+            const items = breakdown.items || [];
+            if (items.length === 0) return;
+
+            const header = new St.BoxLayout({ x_expand: true, style_class: 'ai-usage-breakdown-header' });
+            header.add_child(new St.Label({
+                text: 'MCP tools',
+                style_class: 'ai-usage-breakdown-title',
+                x_expand: true,
+            }));
+            header.add_child(new St.Label({
+                text: total > 0 ? `${fmtNum(total)} used` : 'none used yet',
+                style_class: 'ai-usage-usage-subtitle ai-usage-usage-subtitle-right',
+            }));
+            parent.add_child(header);
+
+            for (const item of items) {
+                const row = new St.BoxLayout({
+                    style_class: 'ai-usage-breakdown-row',
+                    x_expand: true,
+                });
+                row.add_child(new St.Label({
+                    text: item.label,
+                    style_class: 'ai-usage-breakdown-label',
+                    x_expand: true,
+                    y_align: Clutter.ActorAlign.CENTER,
+                }));
+
+                const barBox = new St.BoxLayout({
+                    style_class: 'ai-usage-breakdown-bar-box',
+                    x_expand: true,
+                });
+                // Fill = share of used MCP calls; show as "remaining" so a tool
+                // used heavily appears emptier (more consumed).
+                const pctShare = total > 0 ? (item.value / total) * 100 : 0;
+                this._addProgressBar(barBox, pctShare, 100 - pctShare, COLOR_MUTED);
+                row.add_child(barBox);
+
+                row.add_child(new St.Label({
+                    text: total > 0
+                        ? `${fmtNum(item.value)} (${Math.round(pctShare)}%)`
+                        : `${fmtNum(item.value)}`,
+                    style_class: 'ai-usage-breakdown-count',
+                    y_align: Clutter.ActorAlign.CENTER,
+                }));
+                parent.add_child(row);
             }
         }
 
@@ -382,12 +494,14 @@ const Indicator = GObject.registerClass(
 
             this._addTitle(parent, e.label || 'Usage');
 
-            // Chart area: Cairo-drawn vertical bars.
+            // Chart area: Cairo-drawn vertical bars. Each bar uses its own
+            // color when provided (e.g. peak vs off-peak), else falls back to
+            // the default blue.
             const chart = new St.DrawingArea({
                 style_class: 'ai-usage-barchart',
                 x_expand: true,
             });
-            const barColor = _hexToRgba('#3584e4');
+            const defaultColor = _hexToRgba('#3584e4');
             chart.connect('repaint', area => {
                 const cr = area.get_context();
                 const w = area.width;
@@ -399,28 +513,209 @@ const Indicator = GObject.registerClass(
 
                 for (let i = 0; i < bars.length; i++) {
                     const fraction = bars[i].value / maxVal;
-                    const barH = Math.max(1, Math.round((h - 14) * fraction));
+                    const barH = bars[i].value > 0
+                        ? Math.max(1, Math.round((h - 14) * fraction))
+                        : 0;
                     const x = i * (barW + gap);
                     const y = h - 14 - barH;
-                    cr.setSourceRGBA(barColor[0], barColor[1], barColor[2], barColor[3]);
-                    cr.rectangle(x, y, barW, barH);
-                    cr.fill();
+                    const rgba = bars[i].color ? _hexToRgba(bars[i].color) : defaultColor;
+                    cr.setSourceRGBA(rgba[0], rgba[1], rgba[2], rgba[3]);
+                    if (barH > 0) {
+                        cr.rectangle(x, y, barW, barH);
+                        cr.fill();
+                    }
                 }
                 cr.$dispose();
             });
             parent.add_child(chart);
 
-            // X-axis labels row.
+            // X-axis labels row. Thin labels for dense charts (24h/peak/30d)
+            // so they don't overlap — show every Nth bucket.
+            const step = bars.length > 12 ? Math.ceil(bars.length / 6) : 1;
             const labelRow = new St.BoxLayout({ x_expand: true, style_class: 'ai-usage-barchart-labels' });
-            for (const b of bars) {
+            for (let i = 0; i < bars.length; i++) {
                 labelRow.add_child(new St.Label({
-                    text: b.label,
+                    text: (i % step === 0 || i === bars.length - 1) ? bars[i].label : '',
                     style_class: 'ai-usage-barchart-label',
                     x_expand: true,
                     x_align: Clutter.ActorAlign.CENTER,
                 }));
             }
             parent.add_child(labelRow);
+
+            // Optional legend (e.g. peak vs off-peak split).
+            if (e.legend) {
+                const legendRow = new St.BoxLayout({
+                    x_expand: true,
+                    style_class: 'ai-usage-legend',
+                });
+                for (const item of e.legend) {
+                    legendRow.add_child(this._legendSwatch(item.color));
+                    legendRow.add_child(new St.Label({
+                        text: item.label,
+                        style_class: 'ai-usage-legend-label',
+                        y_align: Clutter.ActorAlign.CENTER,
+                    }));
+                }
+                parent.add_child(legendRow);
+            }
+        }
+
+        /* Peak-hours traffic-light: a colored circle (red = currently peak,
+         * green = off-peak) + a live countdown to the next state change. The
+         * countdown is recomputed every 60s while the menu is open via a
+         * dedicated ticker (this._peakTickerId) that touches only these
+         * widgets — it does not refetch or re-render the menu. */
+        _addPeakStatus(parent, e) {
+            const row = new St.BoxLayout({
+                style_class: 'ai-usage-peak-status',
+                x_expand: true,
+            });
+
+            const dot = new St.DrawingArea({
+                style_class: 'ai-usage-peak-dot',
+            });
+            row.add_child(dot);
+
+            const text = new St.Label({
+                style_class: 'ai-usage-peak-text',
+                x_expand: true,
+                y_align: Clutter.ActorAlign.CENTER,
+            });
+            row.add_child(text);
+            parent.add_child(row);
+
+            const update = () => {
+                const s = currentPeakStatus(new Date());
+                const color = s.inPeak ? COLOR_RED : COLOR_GREEN;
+                const label = s.inPeak ? 'Peak (surcharge)' : 'Off-peak';
+                const next = s.inPeak ? 'peak ends in' : 'peak starts in';
+                text.set_text(`${label} · ${next} ${fmtHMS(s.msToChange)}`);
+
+                // Repaint the dot with the current color.
+                dot.repaint && dot.repaint();
+                dot._peakColor = color;
+            };
+
+            // The dot paints itself from dot._peakColor (set by update()).
+            dot.connect('repaint', area => {
+                const cr = area.get_context();
+                const w = area.width;
+                const h = area.height;
+                if (w <= 0 || h <= 0) { cr.$dispose(); return; }
+                const rgba = _hexToRgba(area._peakColor || COLOR_MUTED);
+                cr.setSourceRGBA(rgba[0], rgba[1], rgba[2], rgba[3]);
+                cr.arc(w / 2, h / 2, Math.min(w, h) / 2 - 1, 0, 2 * Math.PI);
+                cr.fill();
+                cr.$dispose();
+            });
+
+            update();
+
+            // Register for live updates while the menu is open.
+            this._peakWidgets = this._peakWidgets || [];
+            this._peakWidgets.push(update);
+        }
+
+        /* Stacked bar chart: each bucket is a vertical bar split into colored
+         * segments — one per model. A legend row shows each model's color swatch
+         * and its total tokens for the window. Used for Z.AI model usage. */
+        _addStackedBarChart(parent, e) {
+            const buckets = e.buckets || [];
+            if (buckets.length === 0) return;
+            const legend = e.legend || [];
+
+            // Bar heights are relative to the tallest single bucket (sum of its
+            // segments), so the busiest period fills the chart vertically.
+            const bucketTotals = buckets.map(b =>
+                b.segments.reduce((s, seg) => s + seg.value, 0));
+            const maxTotal = Math.max(...bucketTotals, 1);
+
+            this._addTitle(parent, e.label || 'Model usage');
+
+            const chart = new St.DrawingArea({
+                style_class: 'ai-usage-barchart ai-usage-stacked-barchart',
+                x_expand: true,
+            });
+            chart.connect('repaint', area => {
+                const cr = area.get_context();
+                const w = area.width;
+                const h = area.height;
+                if (w <= 0 || h <= 0 || buckets.length === 0) { cr.$dispose(); return; }
+
+                const gap = 2;
+                const barW = Math.max(2, (w - gap * (buckets.length - 1)) / buckets.length);
+                const chartH = h - 16;   // reserve space for x-axis labels
+
+                for (let i = 0; i < buckets.length; i++) {
+                    const total = bucketTotals[i];
+                    if (total <= 0) continue;   // leave empty buckets blank
+                    const scale = chartH / maxTotal;
+                    const x = i * (barW + gap);
+                    let y = chartH;   // bottom-up stacking
+                    for (const seg of buckets[i].segments) {
+                        if (seg.value <= 0) continue;
+                        const segH = Math.max(1, Math.round(seg.value * scale));
+                        y -= segH;
+                        const rgba = _hexToRgba(seg.color);
+                        cr.setSourceRGBA(rgba[0], rgba[1], rgba[2], rgba[3]);
+                        cr.rectangle(x, y, barW, segH);
+                        cr.fill();
+                    }
+                }
+                cr.$dispose();
+            });
+            parent.add_child(chart);
+
+            // X-axis labels: thin them out for dense charts (24h/30d) so they
+            // don't overlap — show every Nth bucket.
+            const step = buckets.length > 12 ? Math.ceil(buckets.length / 6) : 1;
+            const labelRow = new St.BoxLayout({ x_expand: true, style_class: 'ai-usage-barchart-labels' });
+            for (let i = 0; i < buckets.length; i++) {
+                labelRow.add_child(new St.Label({
+                    text: (i % step === 0 || i === buckets.length - 1) ? buckets[i].label : '',
+                    style_class: 'ai-usage-barchart-label',
+                    x_expand: true,
+                    x_align: Clutter.ActorAlign.CENTER,
+                }));
+            }
+            parent.add_child(labelRow);
+
+            // Legend: color swatch + "MODEL total" per model.
+            if (legend.length > 0) {
+                const legendRow = new St.BoxLayout({
+                    x_expand: true,
+                    style_class: 'ai-usage-legend',
+                });
+                for (const m of legend) {
+                    legendRow.add_child(this._legendSwatch(m.color));
+                    legendRow.add_child(new St.Label({
+                        text: `${m.name} ${fmtNum(m.total)}`,
+                        style_class: 'ai-usage-legend-label',
+                        y_align: Clutter.ActorAlign.CENTER,
+                    }));
+                }
+                parent.add_child(legendRow);
+            }
+        }
+
+        _legendSwatch(color) {
+            // A 10x10 Cairo-filled square colored to match the model segment.
+            const swatch = new St.DrawingArea({
+                style_class: 'ai-usage-legend-swatch',
+            });
+            swatch.connect('repaint', area => {
+                const cr = area.get_context();
+                const w = area.width;
+                const h = area.height;
+                if (w <= 0 || h <= 0) { cr.$dispose(); return; }
+                const rgba = _hexToRgba(color);
+                cr.setSourceRGBA(rgba[0], rgba[1], rgba[2], rgba[3]);
+                cr.rectangle(0, 0, w, h);
+                cr.fill();
+                cr.$dispose();
+            });
+            return swatch;
         }
 
         _displayedValue(pctUsed, pctRemaining) {
@@ -530,6 +825,8 @@ const Indicator = GObject.registerClass(
         }
 
         destroy() {
+            this._stopPeakTicker();
+            this._peakWidgets = null;
             if (this._pollId) { GLib.source_remove(this._pollId); this._pollId = 0; }
             if (this._settingsId) { this._settings.disconnect(this._settingsId); this._settingsId = 0; }
             if (this._configMonitorId && this._configMonitor) {

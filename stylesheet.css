@@ -124,3 +124,88 @@
     font-size: 0.65em;
     color: #888888;
 }
+
+/* Stacked bar chart legend (model color-coding) */
+.ai-usage-legend {
+    spacing: 10px;
+    margin-top: 6px;
+    margin-bottom: 8px;
+}
+
+.ai-usage-legend-swatch {
+    width: 10px;
+    height: 10px;
+    margin-right: 4px;
+    border-radius: 2px;
+}
+
+.ai-usage-legend-label {
+    font-size: 0.7em;
+    color: #c0c0c0;
+    margin-right: 8px;
+}
+
+/* Peak-hours traffic-light status */
+.ai-usage-peak-status {
+    spacing: 10px;
+    margin-bottom: 8px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background-color: rgba(255, 255, 255, 0.04);
+}
+
+.ai-usage-peak-dot {
+    width: 14px;
+    height: 14px;
+    margin-top: 2px;
+}
+
+.ai-usage-peak-text {
+    font-size: 0.85em;
+    font-weight: bold;
+    color: #eeeeee;
+}
+
+/* MCP per-tool breakdown */
+.ai-usage-breakdown-header {
+    spacing: 4px;
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
+
+.ai-usage-breakdown-title {
+    font-size: 0.75em;
+    font-weight: bold;
+    color: #c0c0c0;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.ai-usage-breakdown-row {
+    spacing: 8px;
+    margin-bottom: 3px;
+}
+
+.ai-usage-breakdown-label {
+    font-size: 0.75em;
+    color: #c0c0c0;
+    /* Fixed-width label column so all bars share a left edge. */
+    width: 90px;
+}
+
+.ai-usage-breakdown-bar-box {
+    /* Bar takes remaining space; count label sits to the right. */
+}
+
+.ai-usage-breakdown-bar-box .ai-usage-progress-bar {
+    height: 6px;
+    margin-bottom: 0;
+}
+
+.ai-usage-breakdown-count {
+    font-size: 0.7em;
+    color: #aaaaaa;
+    /* Fixed-width count column so bars share a right edge. */
+    width: 70px;
+    text-align: right;
+}
