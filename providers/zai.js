@@ -10,6 +10,10 @@
 import Soup from 'gi://Soup?version=3.0';
 import GLib from 'gi://GLib';
 import { MODEL_COLORS, modelColor } from './colors.js';
+import { USER_AGENT } from './constants.js';
+
+/* Z.AI: peak is 14:00–18:00 UTC+8, i.e. 06:00–10:00 UTC. */
+const ZAI_PEAK_WINDOWS_UTC = [[6, 10]];
 
 const ZAI_ENDPOINTS = {
     intl: {
@@ -47,11 +51,11 @@ function fmtCalls(n) {
 function getAuthHeaders(credentials) {
     const apiKey = credentials.apiKey;
     if (apiKey && apiKey.length > 0) {
-        return { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
+        return { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'User-Agent': USER_AGENT };
     }
     const oauthToken = credentials.oauthToken;
     if (oauthToken && oauthToken.length > 0) {
-        return { 'Authorization': `Bearer ${oauthToken}`, 'Content-Type': 'application/json' };
+        return { 'Authorization': `Bearer ${oauthToken}`, 'Content-Type': 'application/json', 'User-Agent': USER_AGENT };
     }
     return null;
 }
@@ -313,6 +317,7 @@ export const zaiProvider = {
         entries.push({
             kind: 'peakstatus', name: 'Z.AI Peak', group: 'Z.AI',
             label: 'Peak hours',
+            peakWindows: ZAI_PEAK_WINDOWS_UTC,
         });
 
         if (!limits || !Array.isArray(limits)) {
@@ -447,47 +452,17 @@ function dateOf(s) {
 const PEAK_COLOR = '#e01b24';     // red — peak surcharge window
 const OFFPEAK_COLOR = '#26a269';  // green — off-peak
 
-const PEAK_START_HOUR = 14;       // UTC+8 hour
-const PEAK_END_HOUR   = 18;       // UTC+8 hour (exclusive)
+/* Z.AI's peak window is 14:00–18:00 UTC+8. The 4h-bucket chart for the 7d view
+ * colors each bucket by whether its start hour (UTC+8) is the peak start. */
+const PEAK_START_HOUR_UTC8 = 14;
 
 /* Compute the aligned 4h bucket-start hour (UTC+8) for a given hour, so the
  * peak window 14–18 is exactly one clean bucket per day. Boundaries fall at
  * 02 / 06 / 10 / 14 / 18 / 22. A bucket is "peak" iff it starts at 14. */
 function bucketStartHour(hour) {
-    const offset = (((hour - 14) % 4) + 4) % 4;
+    const offset = (((hour - PEAK_START_HOUR_UTC8) % 4) + 4) % 4;
     return hour - offset;
 }
 function isPeakBucket(bucketStart) {
-    return bucketStart === 14;
-}
-
-/* Current peak status at "now": whether we're in the peak window and ms
- * remaining until the next state change (peak→off or off→peak). The menu
- * uses this for the traffic-light indicator + live countdown.
- *
- * The countdown is computed against UTC+8 wall-clock time so it matches the
- * Z.AI billing schedule regardless of the user's local timezone. */
-export function currentPeakStatus(now = new Date()) {
-    // Wall-clock UTC+8 time.
-    const utc8Ms = now.getTime() + 8 * 3600000;
-    const d = new Date(utc8Ms);
-    const hour = d.getUTCHours();
-    const min = d.getUTCMinutes();
-    const sec = d.getUTCSeconds();
-    // Fractional hour within the UTC+8 day.
-    const fracHour = hour + min / 60 + sec / 3600;
-
-    const inPeak = fracHour >= PEAK_START_HOUR && fracHour < PEAK_END_HOUR;
-    let msToChange;
-    if (inPeak) {
-        // Peak ends at 18:00.
-        msToChange = (PEAK_END_HOUR - fracHour) * 3600000;
-    } else if (fracHour < PEAK_START_HOUR) {
-        // Before peak today: time until 14:00.
-        msToChange = (PEAK_START_HOUR - fracHour) * 3600000;
-    } else {
-        // After peak today: time until 14:00 tomorrow.
-        msToChange = (24 + PEAK_START_HOUR - fracHour) * 3600000;
-    }
-    return { inPeak, msToChange: Math.max(0, Math.round(msToChange)) };
+    return bucketStart === PEAK_START_HOUR_UTC8;
 }

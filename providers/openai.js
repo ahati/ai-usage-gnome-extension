@@ -7,9 +7,9 @@
 import Soup from 'gi://Soup?version=3.0';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
+import { USER_AGENT } from './constants.js';
 
 const OPENAI_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
-const USER_AGENT = 'OpenCode-Quota-Toast/1.0';
 
 function clampPercent(val) {
     return Math.max(0, Math.min(100, val));

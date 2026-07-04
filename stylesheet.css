@@ -10,7 +10,8 @@
 /* ── Popup ── */
 
 .ai-usage-popup {
-    min-width: 320px;
+    min-width: 400px;
+    max-width: 600px;
 }
 
 /* Header row */
@@ -152,6 +153,25 @@
     font-size: 0.7em;
     color: #c0c0c0;
     margin-right: 8px;
+}
+
+/* Highlighted value box (e.g. DeepSeek balance): slightly larger rounded
+   card with a soft background so the figure stands out from plain subtitles. */
+.ai-usage-value-box {
+    font-size: 1.3em;
+    font-weight: bold;
+    color: #ffffff;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    background-color: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.ai-usage-value-box-negative {
+    color: #ff5d5d;
+    background-color: rgba(224, 27, 36, 0.12);
+    border-color: rgba(224, 27, 36, 0.3);
 }
 
 /* Peak-hours traffic-light status */

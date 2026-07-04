@@ -7,9 +7,13 @@
 
 import Soup from 'gi://Soup?version=3.0';
 import GLib from 'gi://GLib';
+import { USER_AGENT } from './constants.js';
+
+/* DeepSeek: peak is 01:00–04:00 and 06:00–10:00 UTC
+ * (09:00–12:00 and 14:00–18:00 UTC+8). */
+const DEEPSEEK_PEAK_WINDOWS_UTC = [[1, 4], [6, 10]];
 
 const DEEPSEEK_BALANCE_URL = 'https://api.deepseek.com/user/balance';
-const USER_AGENT = 'OpenCode-Quota-Toast/1.0';
 
 const CURRENCY_SYMBOLS = { CNY: '¥', USD: '$' };
 
@@ -75,6 +79,15 @@ export const deepseekProvider = {
         const entries = [];
         const isAvailable = data?.is_available === true;
         const balanceInfos = data?.balance_infos;
+
+        // Peak-hours traffic-light. The renderer owns the countdown and ticks
+        // it every second while the menu is open; peakWindows parameterizes the
+        // status function so DeepSeek's two UTC windows are honored.
+        entries.push({
+            kind: 'peakstatus', name: 'DeepSeek Peak', group: 'DeepSeek',
+            label: 'Peak hours',
+            peakWindows: DEEPSEEK_PEAK_WINDOWS_UTC,
+        });
 
         if (Array.isArray(balanceInfos) && balanceInfos.length > 0) {
             for (const info of balanceInfos) {

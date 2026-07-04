@@ -18,9 +18,9 @@
 import Soup from 'gi://Soup?version=3.0';
 import GLib from 'gi://GLib';
 import { MODEL_COLORS, modelColor } from './colors.js';
+import { USER_AGENT } from './constants.js';
 
 const BASE = 'https://opencode.ai';
-const USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36';
 
 /* totalCost values from /_server are large integers. Calibrated against the
  * dashboard: a deepseek-v4-pro call with cost:374228 displays as $0.0037,

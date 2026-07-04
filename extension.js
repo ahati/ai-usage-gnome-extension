@@ -15,7 +15,8 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import * as config from './config.js';
-import { zaiProvider, currentPeakStatus } from './providers/zai.js';
+import { zaiProvider } from './providers/zai.js';
+import { currentPeakStatus } from './providers/peak.js';
 import { opencodeGoProvider } from './providers/opencode-go.js';
 import { openaiProvider } from './providers/openai.js';
 import { deepseekProvider } from './providers/deepseek.js';
@@ -387,11 +388,7 @@ const Indicator = GObject.registerClass(
             } else if (e.kind === 'peakstatus') {
                 this._addPeakStatus(parent, e);
             } else {
-                this._addTitle(parent, e.label || 'Value');
-                parent.add_child(new St.Label({
-                    text: e.value ?? '?',
-                    style_class: 'ai-usage-usage-subtitle',
-                }));
+                this._addValueBox(parent, e);
             }
         }
 
@@ -563,6 +560,23 @@ const Indicator = GObject.registerClass(
                 this._addLegendFlow(parent, e.legend, e.unit);
         }
 
+        /* Highlighted value box (e.g. DeepSeek balance): a slightly larger
+         * rounded card with the label above and the value emphasized inside.
+         * Negative balances render in red, positive in green, neutral values
+         * use the default foreground. */
+        _addValueBox(parent, e) {
+            this._addTitle(parent, e.label || 'Value');
+            const raw = e.value ?? '?';
+            const numMatch = String(raw).match(/-?\d/);
+            const isNeg = numMatch && numMatch[0] === '-';
+            const box = new St.Label({
+                text: raw,
+                style_class: 'ai-usage-value-box' + (isNeg ? ' ai-usage-value-box-negative' : ''),
+                x_expand: true,
+            });
+            parent.add_child(box);
+        }
+
         /* Peak-hours traffic-light: a colored circle (red = currently peak,
          * green = off-peak) + a live countdown to the next state change. The
          * countdown is recomputed every 60s while the menu is open via a
@@ -639,7 +653,7 @@ const Indicator = GObject.registerClass(
             parent.add_child(row);
 
             const update = () => {
-                const s = currentPeakStatus(new Date());
+                const s = currentPeakStatus(new Date(), e.peakWindows);
                 const color = s.inPeak ? COLOR_RED : COLOR_GREEN;
                 const label = s.inPeak ? 'Peak (surcharge)' : 'Off-peak';
                 const next = s.inPeak ? 'peak ends in' : 'peak starts in';
