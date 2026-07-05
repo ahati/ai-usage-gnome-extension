@@ -21,7 +21,7 @@ import { opencodeGoProvider } from './providers/opencode-go.js';
 import { openaiProvider } from './providers/openai.js';
 import { deepseekProvider } from './providers/deepseek.js';
 import { addBarChart, addStackedBarChart, addCostDistribution, addProgressBar } from './charting.js';
-import { clamp, fmtNum, hexToRgba } from './providers/utils.js';
+import { clamp, fmtNum, fmtCost, hexToRgba } from './providers/utils.js';
 
 const PROVIDER_REGISTRY = {
     zai: zaiProvider,
@@ -271,6 +271,7 @@ const Indicator = GObject.registerClass(
         /* ── Content ── */
 
         _renderContent() {
+            log(`[ai-usage] _renderContent: activeAccountId=${this._activeAccountId}`);
             this._contentBox.destroy_all_children();
             // Reset the peak-widget list so stale update closures (pointing at
             // destroyed labels) don't fire from the ticker.
@@ -316,6 +317,13 @@ const Indicator = GObject.registerClass(
         }
 
         _addEntry(parent, e) {
+            if (e.kind === 'costdistribution') {
+                const costStr = e.unit === 'cost' ? fmtCost(e.totalCost) : fmtNum(e.totalCost);
+                log(`[ai-usage] RENDER cost-dist "${e.label}": ${e.segments?.length || 0} models=[${(e.segments||[]).map(s => `${s.model} ${e.unit==='cost'?fmtCost(s.value):fmtNum(s.value)}`).join(', ')}] total=${costStr}`);
+            }
+            if (e.kind === 'stackedbarchart') {
+                log(`[ai-usage] RENDER stacked-bar "${e.label}": buckets=${e.buckets?.length || 0} legend=${e.legend?.length || 0}`);
+            }
             if (e.kind === 'percent') {
                 const pctUsed = clamp(e.percentUsed ?? (e.percentRemaining != null
                     ? 100 - e.percentRemaining : 0));
@@ -550,8 +558,26 @@ const Indicator = GObject.registerClass(
             const s = new Soup.Session();
             const accounts = this._getAccounts();
             log(`[ai-usage] Fetching ${accounts.length} account(s)`);
-            const ps = accounts.map(({ account, provider }) =>
-                provider.fetch(s, account.credentials).then(r => {
+
+            // Cost-dist / token-mix refresh floor: at least 1 hour, or the
+            // global refresh interval if the user set it higher.
+            const costDistMinInterval = Math.max(
+                3600,
+                this._settings.get_int('refresh-interval')
+            );
+
+            const ps = accounts.map(({ account, provider }) => {
+                // Per-account callback: only re-render when THIS account
+                // is the active tab, so concurrent background updates from
+                // different workspaces don't show each other's stale data.
+                const onBgUpdate = () => {
+                    log(`[ai-usage] onBackgroundUpdate fired for ${account.id}, activeAccountId=${this._activeAccountId}`);
+                    this._renderContent();
+                };
+                return provider.fetch(s, account.credentials, {
+                    onCostDistUpdate: onBgUpdate,
+                    costDistMinInterval,
+                }).then(r => {
                     this._results[account.id] = r;
                     log(`[ai-usage] ${account.label}: attempted=${r.attempted} entries=${r.entries?.length || 0} errors=${r.errors?.length || 0}`);
                 }).catch(e => {
@@ -559,7 +585,8 @@ const Indicator = GObject.registerClass(
                         attempted: true, entries: [],
                         errors: [`${account.label}: ${e.message || e}`],
                     };
-                }));
+                });
+            });
             await Promise.all(ps);
             this._updatePanel();
             this._renderTabs();

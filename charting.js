@@ -275,6 +275,7 @@ export function addStackedBarChart(parent, e) {
 
 export function addCostDistribution(parent, e) {
     const segments = e.segments || [];
+    log(`[ai-usage] CHART cost-dist "${e.label}": drawing ${segments.length} segments totalCost=${e.totalCost} unit=${e.unit} segments=${JSON.stringify(segments.map(s => ({m:s.model,v:s.value})))}`);
     if (segments.length === 0) return;
     const total = segments.reduce((s, seg) => s + seg.value, 0) || 1;
 
@@ -317,15 +318,18 @@ export function addCostDistribution(parent, e) {
     });
     parent.add_child(bar);
 
-    // Total cost subtitle
+    // Total subtitle — format depends on unit.
+    const totalLabel = e.unit === 'tokens'
+        ? `total ${fmtNum(e.totalCost)} tokens`
+        : `total ${fmtCost(e.totalCost)}`;
     const stats = new St.BoxLayout({ x_expand: true });
     stats.add_child(new St.Label({
-        text: `${segments.length} models`,
+        text: e.unit === 'tokens' ? `${segments.length} types` : `${segments.length} models`,
         style_class: 'ai-usage-usage-subtitle',
         x_expand: true,
     }));
     stats.add_child(new St.Label({
-        text: `total ${fmtCost(e.totalCost)}`,
+        text: totalLabel,
         style_class: 'ai-usage-usage-subtitle ai-usage-usage-subtitle-right',
     }));
     parent.add_child(stats);

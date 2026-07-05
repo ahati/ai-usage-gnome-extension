@@ -19,10 +19,11 @@ export function clamp(v) {
     return Math.max(0, Math.min(100, v));
 }
 
-export const COST_DIVISOR = 101142703;
+export const COST_DIVISOR = 100000000;
 
-/* Format raw OpenCode Go cost units as dollars. Calibrated against the
- * dashboard: cost:374228 → $0.0037, divisor ≈ 101,142,703. */
+/* Format raw OpenCode Go cost units as dollars. Raw values are in
+ * hundred-millionths of a dollar (1e-8): cost:374228 → $0.00374228,
+ * which the dashboard rounds to $0.0037. */
 export function fmtCost(rawCost) {
     const dollars = rawCost / COST_DIVISOR;
     if (dollars >= 100) return `$${dollars.toFixed(0)}`;
@@ -33,6 +34,7 @@ export function fmtCost(rawCost) {
 export function fmtNum(n) {
     if (n === null || n === undefined) return null;
     if (typeof n === 'number') {
+        if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
         if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
         if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
         return String(Math.round(n));
