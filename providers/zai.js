@@ -11,6 +11,7 @@ import Soup from 'gi://Soup?version=3.0';
 import GLib from 'gi://GLib';
 import { MODEL_COLORS, modelColor } from './colors.js';
 import { USER_AGENT } from './constants.js';
+import { clamp, xLabelShort, httpGet } from './utils.js';
 
 /* Z.AI: peak is 14:00–18:00 UTC+8, i.e. 06:00–10:00 UTC. */
 const ZAI_PEAK_WINDOWS_UTC = [[6, 10]];
@@ -36,10 +37,6 @@ function fmtLocal(date) {
     const p = n => String(n).padStart(2, '0');
     return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())} ` +
            `${p(date.getHours())}:${p(date.getMinutes())}:${p(date.getSeconds())}`;
-}
-
-function clampPercent(val) {
-    return Math.max(0, Math.min(100, val));
 }
 
 /* Compact calls formatter for legend totals: 1234 → "1.2K calls". */
@@ -120,27 +117,9 @@ export const zaiProvider = {
     /* GET a JSON endpoint using the same session/headers as the quota call.
      * Returns the parsed envelope {code,msg,data,success} or null on failure. */
     async _getJson(session, headers, url) {
-        try {
-            const message = Soup.Message.new('GET', url);
-            for (const [key, value] of Object.entries(headers))
-                message.get_request_headers().append(key, value);
-            const result = await new Promise((resolve, reject) => {
-                session.send_and_read_async(message, GLib.PRIORITY_DEFAULT, null,
-                    (s, res) => {
-                        try {
-                            const bytes = s.send_and_read_finish(res);
-                            const status = message.get_status();
-                            const body = new TextDecoder().decode(
-                                bytes?.get_data() ?? new Uint8Array(0));
-                            resolve({ status, body });
-                        } catch (e) { reject(e); }
-                    });
-            });
-            if (result.status !== 200) return null;
-            return JSON.parse(result.body);
-        } catch (e) {
-            return null;
-        }
+        const body = await httpGet(session, url, headers);
+        if (!body) return null;
+        try { return JSON.parse(body); } catch (e) { return null; }
     },
 
     /* Fetch the model-usage time series and append three stacked-barchart
@@ -198,7 +177,7 @@ export const zaiProvider = {
         let buckets = [];
         for (let i = 0; i < xTime.length; i++) {
             const xLabel = (data.granularity === 'daily')
-                ? xLabelDaily(xTime[i])
+                ? xLabelShort(xTime[i])
                 : xLabelHourly(xTime[i], i === 0);
             const segs = models.map(m => {
                 const series = mdl.find(d => d.modelName === m.name);
@@ -326,7 +305,7 @@ export const zaiProvider = {
                 const pct = data.sessionUtilization ?? data.session_utilization;
                 entries.push({
                     kind: 'percent', name: 'Z.AI Session', group: 'Z.AI',
-                    label: 'Session:', percentUsed: pct, percentRemaining: clampPercent(100 - pct),
+                    label: 'Session:', percentUsed: pct, percentRemaining: clamp(100 - pct),
                 });
             }
             if (entries.length === 0) {
@@ -344,7 +323,7 @@ export const zaiProvider = {
 
         const tokenLimits = limits
             .filter(l => l.type === 'TOKENS_LIMIT')
-            .sort((a, b) => (a.nextResetTime ?? Infinity) - (b.nextResetTime ?? Infinity));
+            .sort((a, b) => (a.unit ?? 99) - (b.unit ?? 99));
 
         const timeLimits = limits.filter(l => l.type === 'TIME_LIMIT');
 
@@ -354,7 +333,7 @@ export const zaiProvider = {
             entries.push({
                 kind: 'percent', name: 'Z.AI Session', group: 'Z.AI',
                 label: 'Session:', percentUsed: sessionPct,
-                percentRemaining: clampPercent(100 - sessionPct),
+                percentRemaining: clamp(100 - sessionPct),
             });
         }
 
@@ -370,7 +349,7 @@ export const zaiProvider = {
             entries.push({
                 kind: 'percent', name, group: 'Z.AI', label,
                 percentUsed: pct,
-                percentRemaining: clampPercent(100 - pct),
+                percentRemaining: clamp(100 - pct),
                 resetTimeIso: resetIso,
                 remaining: tl.remaining ?? null,
             });
@@ -395,7 +374,7 @@ export const zaiProvider = {
             entries.push({
                 kind: 'percent', name: 'Z.AI MCP', group: 'Z.AI', label: 'MCP:',
                 percentUsed: pct,
-                percentRemaining: clampPercent(100 - pct),
+                percentRemaining: clamp(100 - pct),
                 resetTimeIso: resetIso,
                 remaining: tl.remaining ?? null,
                 breakdown: items.length ? { total: totalUsed, items } : null,
@@ -418,12 +397,6 @@ function xLabelHourly(s, firstInSeries) {
     const m = /(\d{2}):(\d{2})$/.exec(s);
     if (m) return `${m[1]}h`;
     return s;
-}
-
-function xLabelDaily(s) {
-    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
-    if (!m) return s;
-    return `${m[2]}/${m[3]}`;   // MM/DD — short for the dense 30-bar chart
 }
 
 /* Label for a 4h peak bucket in the 7d chart. Each day has 6 buckets, so we

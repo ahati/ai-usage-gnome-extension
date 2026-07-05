@@ -8,12 +8,9 @@ import Soup from 'gi://Soup?version=3.0';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import { USER_AGENT } from './constants.js';
+import { clamp } from './utils.js';
 
 const OPENAI_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
-
-function clampPercent(val) {
-    return Math.max(0, Math.min(100, val));
-}
 
 function getAuthHeaders(credentials) {
     const oauthToken = credentials.oauthToken;
@@ -86,7 +83,7 @@ export const openaiProvider = {
         else if (planType.includes('plus')) group = 'OpenAI (Plus)';
 
         // Primary window (hourly / ~5h)
-        const remainingPct = clampPercent(100 - primary.used_percent);
+        const remainingPct = clamp(100 - primary.used_percent);
         const resetIso = primary.reset_at
             ? new Date(primary.reset_at * 1000).toISOString()
             : (primary.reset_after_seconds
@@ -102,7 +99,7 @@ export const openaiProvider = {
 
         // Secondary window (weekly)
         if (secondary) {
-            const weeklyRemaining = clampPercent(100 - secondary.used_percent);
+            const weeklyRemaining = clamp(100 - secondary.used_percent);
             const weeklyResetIso = secondary.reset_at
                 ? new Date(secondary.reset_at * 1000).toISOString()
                 : (secondary.reset_after_seconds
@@ -118,7 +115,7 @@ export const openaiProvider = {
 
         // Code review window
         if (codeReview) {
-            const crRemaining = clampPercent(100 - codeReview.used_percent);
+            const crRemaining = clamp(100 - codeReview.used_percent);
             const crResetIso = codeReview.reset_at
                 ? new Date(codeReview.reset_at * 1000).toISOString()
                 : null;

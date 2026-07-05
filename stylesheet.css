@@ -115,10 +115,20 @@
     height: 22px;
 }
 
+/* Chart box: St.BoxLayout wrapper that provides a visible card background
+   behind the Cairo-drawn bar chart, so zero/empty bars don't blend into
+   the popup. Same pattern as .ai-usage-value-box. */
+.ai-usage-chart-box {
+    padding: 4px 6px 1px 6px;
+    margin-bottom: 6px;
+    border-radius: 8px;
+    background-color: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
 /* Bar chart: St.DrawingArea for token usage history */
 .ai-usage-barchart {
     height: 60px;
-    margin-bottom: 4px;
 }
 
 .ai-usage-barchart-labels {

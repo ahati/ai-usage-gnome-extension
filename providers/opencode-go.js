@@ -19,25 +19,9 @@ import Soup from 'gi://Soup?version=3.0';
 import GLib from 'gi://GLib';
 import { MODEL_COLORS, modelColor } from './colors.js';
 import { USER_AGENT } from './constants.js';
+import { clamp, COST_DIVISOR, fmtCost, xLabelShort, httpGet, httpPost } from './utils.js';
 
 const BASE = 'https://opencode.ai';
-
-/* totalCost values from /_server are large integers. Calibrated against the
- * dashboard: a deepseek-v4-pro call with cost:374228 displays as $0.0037,
- * giving a divisor of 374228 / 0.0037 ≈ 101,142,703. */
-const COST_DIVISOR = 101142703;
-
-function clampPercent(val) {
-    return Math.max(0, Math.min(100, val));
-}
-
-/* Format raw cost units as dollars. */
-function fmtCost(rawCost) {
-    const dollars = rawCost / COST_DIVISOR;
-    if (dollars >= 100) return `$${dollars.toFixed(0)}`;
-    if (dollars >= 1) return `$${dollars.toFixed(2)}`;
-    return `$${dollars.toFixed(3)}`;
-}
 
 export const opencodeGoProvider = {
     id: 'opencode-go',
@@ -120,24 +104,11 @@ export const opencodeGoProvider = {
     },
 
     async _get(session, url, authCookie) {
-        return new Promise((resolve, reject) => {
-            const msg = Soup.Message.new('GET', url);
-            msg.get_request_headers().append('User-Agent', USER_AGENT);
-            msg.get_request_headers().append('Accept', '*/*');
-            msg.get_request_headers().append('Cookie', `auth=${authCookie}`);
-            msg.get_request_headers().append('Referer', `${BASE}/workspace/`);
-
-            session.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, null,
-                (s, res) => {
-                    try {
-                        const bytes = s.send_and_read_finish(res);
-                        if (msg.get_status() !== 200) {
-                            resolve(null);
-                            return;
-                        }
-                        resolve(new TextDecoder().decode(bytes?.get_data() ?? new Uint8Array(0)));
-                    } catch (e) { reject(e); }
-                });
+        return await httpGet(session, url, {
+            'User-Agent': USER_AGENT,
+            'Accept': '*/*',
+            'Cookie': `auth=${authCookie}`,
+            'Referer': `${BASE}/workspace/`,
         });
     },
 
@@ -321,7 +292,7 @@ export const opencodeGoProvider = {
                 const v = dm.get(name) || 0;
                 if (v > 0) segments.push({ model: name, color: info.color, value: v });
             }
-            return { label: this._shortDate(date), segments };
+            return { label: xLabelShort(date), segments };
         });
 
         // Per-model totals for the legend (sum over the window).
@@ -343,11 +314,6 @@ export const opencodeGoProvider = {
             group: 'OpenCode Go', label, buckets, legend,
             granularity: 'daily', unit: 'cost',
         };
-    },
-
-    _shortDate(dateStr) {
-        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr);
-        return m ? `${m[2]}/${m[3]}` : dateStr;
     },
 
     /* POST /_server with the getUsageInfo server function to fetch one page
@@ -562,7 +528,7 @@ export const opencodeGoProvider = {
             entries.push({
                 kind: 'percent', name: 'OpenCode Go 5h', group: 'OpenCode Go',
                 label: '5h:', percentUsed: rolling.usagePercent,
-                percentRemaining: clampPercent(100 - rolling.usagePercent),
+                percentRemaining: clamp(100 - rolling.usagePercent),
                 resetTimeIso: new Date(now + rolling.resetInSec * 1000).toISOString(),
             });
         }
@@ -570,7 +536,7 @@ export const opencodeGoProvider = {
             entries.push({
                 kind: 'percent', name: 'OpenCode Go Weekly', group: 'OpenCode Go',
                 label: 'Weekly:', percentUsed: weekly.usagePercent,
-                percentRemaining: clampPercent(100 - weekly.usagePercent),
+                percentRemaining: clamp(100 - weekly.usagePercent),
                 resetTimeIso: new Date(now + weekly.resetInSec * 1000).toISOString(),
             });
         }
@@ -578,7 +544,7 @@ export const opencodeGoProvider = {
             entries.push({
                 kind: 'percent', name: 'OpenCode Go Monthly', group: 'OpenCode Go',
                 label: 'Monthly:', percentUsed: monthly.usagePercent,
-                percentRemaining: clampPercent(100 - monthly.usagePercent),
+                percentRemaining: clamp(100 - monthly.usagePercent),
                 resetTimeIso: new Date(now + monthly.resetInSec * 1000).toISOString(),
             });
         }
