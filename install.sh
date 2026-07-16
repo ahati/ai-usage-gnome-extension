@@ -14,6 +14,7 @@ mkdir -p "${EXT_DIR}/schemas"
 # Copy files
 cp extension.js "${EXT_DIR}/"
 cp charting.js "${EXT_DIR}/"
+cp logger.js "${EXT_DIR}/"
 cp prefs.js "${EXT_DIR}/"
 cp config.js "${EXT_DIR}/"
 cp stylesheet.css "${EXT_DIR}/"

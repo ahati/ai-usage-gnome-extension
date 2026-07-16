@@ -9,6 +9,7 @@
 
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
+import * as logger from './logger.js';
 
 const CONFIG_DIR = GLib.build_filenamev([GLib.get_user_data_dir(), '.ai-usage-ext']);
 const CONFIG_PATH = GLib.build_filenamev([CONFIG_DIR, 'config.json']);
@@ -61,7 +62,7 @@ export function save(config) {
         tmp.move(dest, Gio.FileCopyFlags.OVERWRITE | Gio.FileCopyFlags.BACKUP, null, null);
         return true;
     } catch (e) {
-        log(`[ai-usage] config.save failed: ${e}`);
+        logger.error('config.save failed:', e);
         return false;
     }
 }

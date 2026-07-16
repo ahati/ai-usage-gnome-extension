@@ -41,5 +41,18 @@
       <description>Usage percentage above which the indicator turns red.</description>
     </key>
 
+    <key name="log-level" type="s">
+      <choices>
+        <choice value='debug'/>
+        <choice value='info'/>
+        <choice value='warn'/>
+        <choice value='error'/>
+        <choice value='off'/>
+      </choices>
+      <default>'info'</default>
+      <summary>Log Level</summary>
+      <description>Minimum log level written to the system journal. DEBUG is verbose (pagination loops, render details); INFO shows fetch lifecycle; WARN shows recoverable problems; ERROR shows failures only; OFF disables all extension logging.</description>
+    </key>
+
   </schema>
 </schemalist>

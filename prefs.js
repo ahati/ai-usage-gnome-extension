@@ -12,6 +12,7 @@ import Soup from 'gi://Soup?version=3.0';
 import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 import * as config from './config.js';
+import * as logger from './logger.js';
 
 const PROVIDER_INFO = {
     zai: { name: 'Z.AI (Zhipu)' },
@@ -23,6 +24,7 @@ const PROVIDER_INFO = {
 export default class AiUsagePreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
+        logger.setLevel(settings.get_string('log-level'));
 
         this._buildGeneralPage(window, settings);
         this._buildAccountsPage(window);
@@ -59,6 +61,20 @@ export default class AiUsagePreferences extends ExtensionPreferences {
         displayGroup.add(showLogosRow);
         showLogosRow.connect('notify::active', row => {
             settings.set_boolean('show-logos', row.active);
+        });
+
+        const logLevelRow = new Adw.ComboRow({
+            title: _('Log level'),
+            subtitle: _('Minimum severity written to the system journal. DEBUG is verbose (pagination loops, render details).'),
+            model: Gtk.StringList.new([_('Debug'), _('Info'), _('Warn'), _('Error'), _('Off')]),
+            selected: ['debug', 'info', 'warn', 'error', 'off'].indexOf(settings.get_string('log-level')),
+        });
+        displayGroup.add(logLevelRow);
+        logLevelRow.connect('notify::selected', row => {
+            const levels = ['debug', 'info', 'warn', 'error', 'off'];
+            const level = levels[row.selected] || 'info';
+            settings.set_string('log-level', level);
+            logger.setLevel(level);
         });
 
         const thresholdGroup = new Adw.PreferencesGroup({ title: _('Usage Thresholds') });

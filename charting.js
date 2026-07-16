@@ -10,6 +10,7 @@
 import St from 'gi://St';
 import Clutter from 'gi://Clutter';
 import { hexToRgba, fmtNum, fmtCost } from './providers/utils.js';
+import * as logger from './logger.js';
 
 /* ── Cairo helpers ── */
 
@@ -275,7 +276,7 @@ export function addStackedBarChart(parent, e) {
 
 export function addCostDistribution(parent, e) {
     const segments = e.segments || [];
-    log(`[ai-usage] CHART cost-dist "${e.label}": drawing ${segments.length} segments totalCost=${e.totalCost} unit=${e.unit} segments=${JSON.stringify(segments.map(s => ({m:s.model,v:s.value})))}`);
+    logger.debug('CHART cost-dist:', `"${e.label}" drawing ${segments.length} segments totalCost=${e.totalCost} unit=${e.unit} segments=`, segments.map(s => ({m:s.model, v:s.value})));
     if (segments.length === 0) return;
     const total = segments.reduce((s, seg) => s + seg.value, 0) || 1;
 

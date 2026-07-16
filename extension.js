@@ -22,6 +22,7 @@ import { openaiProvider } from './providers/openai.js';
 import { deepseekProvider } from './providers/deepseek.js';
 import { addBarChart, addStackedBarChart, addCostDistribution, addProgressBar } from './charting.js';
 import { clamp, fmtNum, fmtCost, hexToRgba } from './providers/utils.js';
+import * as logger from './logger.js';
 
 const PROVIDER_REGISTRY = {
     zai: zaiProvider,
@@ -97,6 +98,13 @@ const Indicator = GObject.registerClass(
             this._setupConfigMonitor();
             this._scheduleRefresh();
 
+            // Wire up log-level from GSettings so users can control
+            // verbosity without restarting the shell.
+            logger.setLevel(this._settings.get_string('log-level'));
+            this._logLevelId = this._settings.connect('changed::log-level', () => {
+                logger.setLevel(this._settings.get_string('log-level'));
+            });
+
             /* Peak-status ticker: ticks every 1s while the menu is open so
              * the traffic-light countdown stays live. Started on open, stopped
              * on close — never runs with the menu hidden. */
@@ -114,7 +122,7 @@ const Indicator = GObject.registerClass(
                 GLib.PRIORITY_DEFAULT, 1, () => {
                     if (this._peakWidgets) {
                         for (const u of this._peakWidgets) {
-                            try { u(); } catch (e) { log(`[ai-usage] peak tick: ${e}`); }
+                            try { u(); } catch (e) { logger.error('peak tick:', e); }
                         }
                     }
                     return GLib.SOURCE_CONTINUE;
@@ -195,7 +203,7 @@ const Indicator = GObject.registerClass(
                     this._scheduleRefresh(0);
                 });
             } catch (e) {
-                log(`[ai-usage] could not monitor config: ${e}`);
+                logger.error('could not monitor config:', e);
             }
         }
 
@@ -271,7 +279,7 @@ const Indicator = GObject.registerClass(
         /* ── Content ── */
 
         _renderContent() {
-            log(`[ai-usage] _renderContent: activeAccountId=${this._activeAccountId}`);
+            logger.debug('_renderContent:', `activeAccountId=${this._activeAccountId}`);
             this._contentBox.destroy_all_children();
             // Reset the peak-widget list so stale update closures (pointing at
             // destroyed labels) don't fire from the ticker.
@@ -319,10 +327,10 @@ const Indicator = GObject.registerClass(
         _addEntry(parent, e) {
             if (e.kind === 'costdistribution') {
                 const costStr = e.unit === 'cost' ? fmtCost(e.totalCost) : fmtNum(e.totalCost);
-                log(`[ai-usage] RENDER cost-dist "${e.label}": ${e.segments?.length || 0} models=[${(e.segments||[]).map(s => `${s.model} ${e.unit==='cost'?fmtCost(s.value):fmtNum(s.value)}`).join(', ')}] total=${costStr}`);
+                logger.debug('RENDER cost-dist:', `"${e.label}" ${e.segments?.length || 0} models=[${(e.segments||[]).map(s => `${s.model} ${e.unit==='cost'?fmtCost(s.value):fmtNum(s.value)}`).join(', ')}] total=${costStr}`);
             }
             if (e.kind === 'stackedbarchart') {
-                log(`[ai-usage] RENDER stacked-bar "${e.label}": buckets=${e.buckets?.length || 0} legend=${e.legend?.length || 0}`);
+                logger.debug('RENDER stacked-bar:', `"${e.label}" buckets=${e.buckets?.length || 0} legend=${e.legend?.length || 0}`);
             }
             if (e.kind === 'percent') {
                 const pctUsed = clamp(e.percentUsed ?? (e.percentRemaining != null
@@ -557,7 +565,7 @@ const Indicator = GObject.registerClass(
         async _fetchAll() {
             const s = new Soup.Session();
             const accounts = this._getAccounts();
-            log(`[ai-usage] Fetching ${accounts.length} account(s)`);
+            logger.info('Fetching', accounts.length, 'account(s)');
 
             // Cost-dist / token-mix refresh floor: at least 1 hour, or the
             // global refresh interval if the user set it higher.
@@ -571,7 +579,7 @@ const Indicator = GObject.registerClass(
                 // is the active tab, so concurrent background updates from
                 // different workspaces don't show each other's stale data.
                 const onBgUpdate = () => {
-                    log(`[ai-usage] onBackgroundUpdate fired for ${account.id}, activeAccountId=${this._activeAccountId}`);
+                    logger.info('onBackgroundUpdate fired for', account.id, `activeAccountId=${this._activeAccountId}`);
                     this._renderContent();
                 };
                 return provider.fetch(s, account.credentials, {
@@ -579,7 +587,7 @@ const Indicator = GObject.registerClass(
                     costDistMinInterval,
                 }).then(r => {
                     this._results[account.id] = r;
-                    log(`[ai-usage] ${account.label}: attempted=${r.attempted} entries=${r.entries?.length || 0} errors=${r.errors?.length || 0}`);
+                    logger.info(`${account.label}:`, `attempted=${r.attempted} entries=${r.entries?.length || 0} errors=${r.errors?.length || 0}`);
                 }).catch(e => {
                     this._results[account.id] = {
                         attempted: true, entries: [],
@@ -622,6 +630,7 @@ const Indicator = GObject.registerClass(
             this._peakWidgets = null;
             if (this._pollId) { GLib.source_remove(this._pollId); this._pollId = 0; }
             if (this._settingsId) { this._settings.disconnect(this._settingsId); this._settingsId = 0; }
+            if (this._logLevelId) { this._settings.disconnect(this._logLevelId); this._logLevelId = 0; }
             if (this._configMonitorId && this._configMonitor) {
                 this._configMonitor.disconnect(this._configMonitorId);
                 this._configMonitorId = 0;

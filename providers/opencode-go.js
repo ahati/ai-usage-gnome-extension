@@ -20,6 +20,7 @@ import GLib from 'gi://GLib';
 import { MODEL_COLORS, modelColor } from './colors.js';
 import { USER_AGENT } from './constants.js';
 import { clamp, COST_DIVISOR, fmtCost, xLabelShort, httpGet, httpPost } from './utils.js';
+import * as logger from '../logger.js';
 
 const BASE = 'https://opencode.ai';
 
@@ -70,7 +71,7 @@ export const opencodeGoProvider = {
                     if (rolling) result.entries.push(rolling);
                 }
             } catch (e) {
-                log(`[ai-usage] OpenCode Go rolling chart failed: ${e}`);
+                logger.error('OpenCode Go rolling chart failed:', e);
             }
 
             // 3. Cost charts: a horizontal cost-distribution bar from recent
@@ -100,7 +101,7 @@ export const opencodeGoProvider = {
                             this._continueCostFetch(
                                 session, workspaceId, authCookie, inferred.getUsageInfo,
                                 callbacks, callbacks?.costDistMinInterval ?? 0
-                            ).catch(e => log(`[ai-usage] cost-dist phase 2 failed: ${e}`));
+                            ).catch(e => logger.error('cost-dist phase 2 failed:', e));
                         }
                     }
                     // 30d daily stacked-by-model cost chart.
@@ -109,10 +110,10 @@ export const opencodeGoProvider = {
                             session, workspaceId, authCookie, inferred.getCosts, result.entries);
                     }
                 } else {
-                    log('[ai-usage] OpenCode Go: could not resolve x-server-id; skipping cost charts');
+                    logger.warn('OpenCode Go: could not resolve x-server-id; skipping cost charts');
                 }
             } catch (e) {
-                log(`[ai-usage] OpenCode Go cost charts failed: ${e}`);
+                logger.error('OpenCode Go cost charts failed:', e);
             }
 
             return result;
@@ -147,7 +148,7 @@ export const opencodeGoProvider = {
             if (!usageHtml) return null;
             const entryMatch = usageHtml.match(/src="(\/_build\/assets\/entry-client-[^"]+\.js)"/);
             if (!entryMatch) {
-                log('[ai-usage] could not find entry-client bundle');
+                logger.warn('could not find entry-client bundle');
                 return null;
             }
 
@@ -184,10 +185,10 @@ export const opencodeGoProvider = {
                 }
             }
             this._inferredIds = ids;
-            log(`[ai-usage] inferred server ids: getCosts=${ids.getCosts?.slice(0, 8)}… getUsageInfo=${ids.getUsageInfo?.slice(0, 8)}…`);
+            logger.info('inferred server ids:', `getCosts=${ids.getCosts?.slice(0, 8)}… getUsageInfo=${ids.getUsageInfo?.slice(0, 8)}…`);
             return ids;
         } catch (e) {
-            log(`[ai-usage] server-id inference failed: ${e}`);
+            logger.error('server-id inference failed:', e);
             return null;
         }
     },
@@ -236,7 +237,7 @@ export const opencodeGoProvider = {
                             respBytes?.get_data() ?? new Uint8Array(0));
                         resolve(this._parseServerRecords(text));
                     } catch (e) {
-                        log(`[ai-usage] /_server error: ${e}`);
+                        logger.error('/_server error:', e);
                         resolve(null);
                     }
                 });
@@ -358,13 +359,13 @@ export const opencodeGoProvider = {
      * Explicit property assignment is more reliable than Object.assign in
      * GJS when the destination is referenced by active menu widgets. */
     _copyEntryFields(dst, src) {
-        log(`[ai-usage] _copyEntryFields BEFORE: dst.label="${dst.label}" dst.segments.length=${dst.segments?.length||0} models=[${(dst.segments||[]).map(s=>s.model).join(',')}]`);
+        logger.debug('_copyEntryFields BEFORE:', `dst.label="${dst.label}" dst.segments.length=${dst.segments?.length||0} models=[${(dst.segments||[]).map(s=>s.model).join(',')}]`);
         dst.label = src.label;
         dst.segments = src.segments;
         dst.legend = src.legend;
         dst.totalCost = src.totalCost;
         dst.unit = src.unit;
-        log(`[ai-usage] _copyEntryFields AFTER:  dst.label="${dst.label}" dst.segments.length=${dst.segments?.length||0} models=[${(dst.segments||[]).map(s=>s.model).join(',')}]`);
+        logger.debug('_copyEntryFields AFTER:', `dst.label="${dst.label}" dst.segments.length=${dst.segments?.length||0} models=[${(dst.segments||[]).map(s=>s.model).join(',')}]`);
     },
 
     /* POST /_server with the getUsageInfo server function to fetch one page
@@ -411,7 +412,7 @@ export const opencodeGoProvider = {
                             respBytes?.get_data() ?? new Uint8Array(0));
                         resolve(this._parseUsageRecords(text));
                     } catch (e) {
-                        log(`[ai-usage] getUsageInfo error: ${e}`);
+                        logger.error('getUsageInfo error:', e);
                         resolve(null);
                     }
                 });
@@ -536,7 +537,7 @@ export const opencodeGoProvider = {
             }
             if (fresh.length) {
                 all.unshift(...fresh);
-                log(`[ai-usage] cost-dist phase 1: +${fresh.length} new call(s) on page 0`);
+                logger.info('cost-dist phase 1:', `+${fresh.length} new call(s) on page 0`);
             }
         }
 
@@ -545,7 +546,7 @@ export const opencodeGoProvider = {
         const entry = this._buildCostEntry(all);
         if (!entry) return null;
         ws._costDistEntry = entry;
-        log(`[ai-usage] cost-dist phase 1 done: ${all.length} records cached, ${entry.segments.length} model(s)`);
+        logger.info('cost-dist phase 1 done:', `${all.length} records cached, ${entry.segments.length} model(s)`);
         return entry;
     },
 
@@ -568,7 +569,7 @@ export const opencodeGoProvider = {
         const now = Date.now();
         if (ws._costDistLastFullMs &&
             now - ws._costDistLastFullMs < costDistMinInterval * 1000) {
-            log(`[ai-usage] cost-dist phase 2: throttled (last full fetch ${Math.round((now - ws._costDistLastFullMs) / 1000)}s ago)`);
+            logger.warn('cost-dist phase 2: throttled', `(last full fetch ${Math.round((now - ws._costDistLastFullMs) / 1000)}s ago)`);
             return;
         }
 
@@ -580,7 +581,7 @@ export const opencodeGoProvider = {
 
         // Hard stop: never page past MAX_RECORDS / PAGE pages of history.
         const MAX_PAGE = Math.ceil(MAX_RECORDS / PAGE);
-        log(`[ai-usage] cost-dist phase 2: resuming at page 1 (cached=${all.length})`);
+        logger.info('cost-dist phase 2:', `resuming at page 1 (cached=${all.length})`);
 
         const pushNew = (records) => {
             let added = 0;
@@ -605,35 +606,35 @@ export const opencodeGoProvider = {
                 if (tm) this._copyEntryFields(ws._tokenMixEntry, tm);
             }
             if (callbacks.onCostDistUpdate) {
-                try { callbacks.onCostDistUpdate(); } catch (e) { log(`[ai-usage] onCostDistUpdate threw: ${e}`); }
+                try { callbacks.onCostDistUpdate(); } catch (e) { logger.error('onCostDistUpdate threw:', e); }
             }
         };
 
         for (let pg = 1; pg <= MAX_PAGE; pg++) {
             if (ws._costDistCancelToken !== cancelToken) {
-                log('[ai-usage] cost-dist phase 2: cancelled by newer fetch');
+                logger.debug('cost-dist phase 2: cancelled by newer fetch');
                 return;
             }
             const p = await this._postGetUsageInfo(
                 session, workspaceId, authCookie, serverId, pg);
             if (!p || p.length === 0) {
-                log(`[ai-usage] cost-dist phase 2 page ${pg}: ${p ? p.length : 'null'} — natural end`);
+                logger.debug(`cost-dist phase 2 page ${pg}:`, `${p ? p.length : 'null'} — natural end`);
                 break;
             }
             const added = pushNew(p);
             if (p.length < PAGE) {
-                log(`[ai-usage] cost-dist phase 2 page ${pg}: short page (${p.length}) — natural end`);
+                logger.debug(`cost-dist phase 2 page ${pg}:`, `short page (${p.length}) — natural end`);
                 break;
             }
             if (added === 0) {
                 // Full page of already-known ids → reached cached history.
-                log(`[ai-usage] cost-dist phase 2 page ${pg}: caught up (0 new)`);
+                logger.debug(`cost-dist phase 2 page ${pg}: caught up (0 new)`);
                 break;
             }
             addedSinceUpdate += added;
             if (addedSinceUpdate >= UPDATE_EVERY) {
                 addedSinceUpdate = 0;
-                log(`[ai-usage] cost-dist phase 2 progress: ${all.length} records`);
+                logger.debug('cost-dist phase 2 progress:', `${all.length} records`);
                 render();
             }
         }
@@ -649,7 +650,7 @@ export const opencodeGoProvider = {
         }
         ws._costDistLastFullMs = Date.now();
         render();
-        log(`[ai-usage] cost-dist phase 2 done: ${all.length} records`);
+        logger.info('cost-dist phase 2 done:', `${all.length} records`);
     },
 
     /* Build a horizontal segmented bar showing token-type breakdown across
@@ -702,7 +703,7 @@ export const opencodeGoProvider = {
             name: s.model, color: s.color, total: s.value,
         }));
 
-        log(`[ai-usage] token-mix built: ${capped.length} records, total=${total} tokens, types=${JSON.stringify(segments.map(s => s.model))}`);
+        logger.debug('token-mix built:', `${capped.length} records, total=${total} tokens, types=`, segments.map(s => s.model));
         return {
             kind: 'costdistribution', name: 'OpenCode Go Token Mix',
             group: 'OpenCode Go',
