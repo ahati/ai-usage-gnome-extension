@@ -19,8 +19,12 @@
  * reasoning_budget_tokens, reasoning_source, billing_source,
  * cost_micro_cents (1 USD = 100,000,000), created_at (ISO 8601 UTC),
  * service (web-search for search rows), quantity.
+ *
+ * NOTE: records billed to the `go` plan carry cost_micro_cents=0 in the
+ * export (only managed-inference usage carries a charge). When no record
+ * has a charge, the model-share / daily / recent charts fall back to token
+ * volume (unit 'tokens') so the detailed charting keeps working.
  */
-
 import Soup from 'gi://Soup?version=3.0';
 import GLib from 'gi://GLib';
 import { modelColor } from './colors.js';
@@ -87,16 +91,20 @@ export const opencodeGoProvider = {
 
         logger.info('OpenCode Usage API:', `${records.length} records from ${base}`);
 
+        // `go`-plan usage exports with zero charge — fall back to token
+        // volume for the per-model charts so they stay meaningful.
+        const useCost = records.some(r => (r.cost || 0) > 0);
+
         const entries = [];
-        const total = this._buildTotal(records);
+        const total = this._buildTotal(records, useCost);
         if (total) entries.push(total);
-        const dist = this._buildCostEntry(records);
+        const dist = this._buildCostEntry(records, useCost);
         if (dist) entries.push(dist);
         const mix = this._buildTokenBreakdown(records);
         if (mix) entries.push(mix);
-        const stacked = this._buildStackedCostChart(records);
+        const stacked = this._buildStackedCostChart(records, useCost);
         if (stacked) entries.push(stacked);
-        const recent = this._buildRecentChart(records);
+        const recent = this._buildRecentChart(records, useCost);
         if (recent) entries.push(recent);
 
         if (entries.length === 0) {
@@ -229,19 +237,41 @@ export const opencodeGoProvider = {
         return '(unknown)';
     },
 
+    /* Token volume of one record (all six token columns). Chart metric when
+     * no record carries a charge. */
+    _tokens(r) {
+        return (r.inputTokens || 0) + (r.outputTokens || 0) +
+            (r.reasoningTokens || 0) + (r.cacheReadTokens || 0) +
+            (r.cacheWrite5mTokens || 0) + (r.cacheWrite1hTokens || 0);
+    },
+
+    /* Chart metric: microcents when charges exist, else token volume. */
+    _metric(r, useCost) {
+        return useCost ? (r.cost || 0) : this._tokens(r);
+    },
+
     /* ── Entries (same kinds/shapes charting.js already renders) ── */
 
-    _buildTotal(records) {
+    _buildTotal(records, useCost) {
         const totalCost = records.reduce((s, r) => s + (r.cost || 0), 0);
+        if (useCost) {
+            return {
+                kind: 'value', name: 'OpenCode Total', group: 'OpenCode Go',
+                label: `Total cost (${RANGE}, ${records.length} records):`,
+                value: `${fmtCost(totalCost)} (${fmtNum(records.length)} calls)`,
+            };
+        }
+        // Zero-charge export (e.g. `go` plan): show how it was billed.
+        const sources = [...new Set(records.map(r => r.billingSource || 'unknown'))];
         return {
             kind: 'value', name: 'OpenCode Total', group: 'OpenCode Go',
-            label: `Total cost (${RANGE}, ${records.length} records):`,
-            value: `${fmtCost(totalCost)} (${fmtNum(records.length)} calls)`,
+            label: `Usage (${RANGE}, ${records.length} records):`,
+            value: `${sources.join('/')} · ${fmtNum(records.length)} calls (no per-request charge)`,
         };
     },
 
-    /* Cost share per model, descending. */
-    _buildCostEntry(records) {
+    /* Cost share per model — or token share when nothing carries a charge. */
+    _buildCostEntry(records, useCost) {
         const order = [];
         const byModel = new Map();
         for (const r of records) {
@@ -250,7 +280,7 @@ export const opencodeGoProvider = {
                 byModel.set(key, 0);
                 order.push(key);
             }
-            byModel.set(key, byModel.get(key) + (r.cost || 0));
+            byModel.set(key, byModel.get(key) + this._metric(r, useCost));
         }
         const totalCost = [...byModel.values()].reduce((s, v) => s + v, 0);
         if (totalCost === 0) return null;
@@ -263,8 +293,10 @@ export const opencodeGoProvider = {
         return {
             kind: 'costdistribution', name: 'OpenCode Go Cost Dist',
             group: 'OpenCode Go',
-            label: `Cost distribution (${RANGE}, ${records.length} calls)`,
-            segments, legend, totalCost, unit: 'cost',
+            label: useCost
+                ? `Cost distribution (${RANGE}, ${records.length} calls)`
+                : `Model share by tokens (${RANGE}, ${records.length} calls)`,
+            segments, legend, totalCost, unit: useCost ? 'cost' : 'tokens',
         };
     },
 
@@ -317,8 +349,8 @@ export const opencodeGoProvider = {
         };
     },
 
-    /* One bar per calendar day, stacked by model. */
-    _buildStackedCostChart(records) {
+    /* One bar per calendar day, stacked by model (cost or tokens). */
+    _buildStackedCostChart(records, useCost) {
         const modelIndex = new Map();
         const byDate = new Map();
         for (const r of records) {
@@ -328,7 +360,7 @@ export const opencodeGoProvider = {
                 modelIndex.set(key, { name: key, color: modelColor(key, modelIndex.size) });
             if (!byDate.has(r.date)) byDate.set(r.date, new Map());
             const dm = byDate.get(r.date);
-            dm.set(key, (dm.get(key) || 0) + (r.cost || 0));
+            dm.set(key, (dm.get(key) || 0) + this._metric(r, useCost));
         }
         if (byDate.size === 0) return null;
 
@@ -344,8 +376,10 @@ export const opencodeGoProvider = {
         });
 
         const totals = new Map();
-        for (const r of records)
-            totals.set(this._modelKey(r), (totals.get(this._modelKey(r)) || 0) + (r.cost || 0));
+        for (const r of records) {
+            const key = this._modelKey(r);
+            totals.set(key, (totals.get(key) || 0) + this._metric(r, useCost));
+        }
         const legend = [...modelIndex.entries()]
             .map(([name, info]) => ({ name, color: info.color, total: totals.get(name) || 0 }))
             .filter(l => l.total > 0)
@@ -353,14 +387,15 @@ export const opencodeGoProvider = {
 
         return {
             kind: 'stackedbarchart', name: 'OpenCode Go 30d',
-            group: 'OpenCode Go', label: `Cost by model (${RANGE})`,
-            buckets, legend, granularity: 'daily', unit: 'cost',
+            group: 'OpenCode Go',
+            label: useCost ? `Cost by model (${RANGE})` : `Tokens by model (${RANGE})`,
+            buckets, legend, granularity: 'daily', unit: useCost ? 'cost' : 'tokens',
         };
     },
 
-    /* Most recent calls (export is newest-first): bar height = cost,
-     * color = model. Rendered oldest → newest (left → right). */
-    _buildRecentChart(records) {
+    /* Most recent calls (export is newest-first): bar height = cost or
+     * tokens, color = model. Rendered oldest → newest (left → right). */
+    _buildRecentChart(records, useCost) {
         const take = records.slice(0, MAX_RECENT);
         if (take.length === 0) return null;
 
@@ -372,7 +407,7 @@ export const opencodeGoProvider = {
         }
 
         const bars = take.slice().reverse().map(r => ({
-            value: r.cost || 0,
+            value: this._metric(r, useCost),
             color: modelIndex.get(this._modelKey(r)),
             label: '',
         }));
@@ -384,8 +419,11 @@ export const opencodeGoProvider = {
 
         return {
             kind: 'barchart', name: 'OpenCode Go Recent',
-            group: 'OpenCode Go', label: `Recent ${take.length} calls (by cost)`,
-            bars, legend, granularity: 'calls', unit: 'cost',
+            group: 'OpenCode Go',
+            label: useCost
+                ? `Recent ${take.length} calls (by cost)`
+                : `Recent ${take.length} calls (by tokens)`,
+            bars, legend, granularity: 'calls', unit: useCost ? 'cost' : 'tokens',
         };
     },
 };

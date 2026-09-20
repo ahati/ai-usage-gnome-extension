@@ -97,6 +97,29 @@ async function main() {
     }
     print('');
 
+    // ── TEST 5: `go`-plan export (all cost_micro_cents=0) → token fallback ──
+    print('══ TEST 5: zero-charge export falls back to tokens ══');
+    const zeroCsv = HEADER + '\n' +
+        row('1', 'claude-sonnet-4-5', 0, '2026-09-01', 1000, 200) + '\n' +
+        row('2', 'gpt-5', 0, '2026-09-02', 500, 100) + '\n';
+    nextResponse = { status: 200, body: zeroCsv };
+    const zres = await P.fetch(null, { apiKey: 'oc_sk_test' });
+    const zdist = zres.entries.find(e => e.name === 'OpenCode Go Cost Dist');
+    const zrecent = zres.entries.find(e => e.kind === 'barchart');
+    const zstacked = zres.entries.find(e => e.kind === 'stackedbarchart');
+    const ztotal = zres.entries.find(e => e.kind === 'value');
+    print(`  kinds=[${(zres.entries || []).map(e => e.kind).join(',')}]`);
+    allOk &= result(zres.entries.length === 5, `all 5 entries present (got ${zres.entries.length})`);
+    allOk &= result(zdist?.unit === 'tokens' && zdist.totalCost === 1820,
+        `model share by tokens, total 1820 (got ${zdist?.totalCost} ${zdist?.unit})`);
+    allOk &= result(zrecent?.unit === 'tokens' && zrecent.bars.length === 2,
+        `recent by tokens (${zrecent?.bars?.length} bars)`);
+    allOk &= result(zstacked?.unit === 'tokens' && zstacked.buckets.length === 2,
+        `stacked by tokens (${zstacked?.buckets?.length} days)`);
+    allOk &= result(/no per-request charge/.test(ztotal?.value || ''),
+        `total explains billing ("${ztotal?.value}")`);
+    print('');
+
     print(allOk ? '══ ALL TESTS PASSED ══' : '══ SOME TESTS FAILED ══');
 }
 
