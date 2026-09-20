@@ -1,138 +1,100 @@
 #!/usr/bin/env gjs
 /* gjs-flow-test.js — Exercise the REAL opencode-go provider in GJS.
  *
- * Imports providers/opencode-go.js directly and runs phase-1 (_buildCostDistribution)
- * + phase-2 (_continueCostFetch) against the cached getUsageInfo pages, mocking
- * only the HTTP layer (_postGetUsageInfo). Validates:
- *   1. cold cache → full dataset (300), onCostDistUpdate fires
- *   2. truncated cache (50) → self-heals to full dataset (the "stops at 50" bug)
- *   3. full cache + no new calls → phase 2 cheap (caught up after 1 page)
- *   4. cost + token distribution built correctly (id present, models listed)
+ * Mocks only the HTTP layer (_getCsv) with a canned Usage API export, then
+ * runs the full fetch() → entry builders pipeline. Validates:
+ *   1. entries built from one CSV (total, cost-dist, token-mix, stacked, recent)
+ *   2. legacy cookie-only accounts get the migration error
+ *   3. missing key → attempted=false
+ *   4. HTTP 401 maps to the key error, header-only CSV → zero total
  *
  * Run from project root:  gjs -m gjs-flow-test.js
  */
-import GLib from 'gi://GLib';
 import { opencodeGoProvider as P } from './providers/opencode-go.js';
 
-const CACHE_DIR = '/tmp/opencode-go-usage_data';
-const WS = 'wrk_test';
-const COOKIE = 'cookie';
-const SERVER_ID = 'serverid';
+const HEADER = 'id,user_email,service_account_name,app,provider,model,' +
+    'input_tokens,output_tokens,reasoning_tokens,cache_read_tokens,' +
+    'cache_write_5m_tokens,cache_write_1h_tokens,reasoning_mode,' +
+    'reasoning_effort,reasoning_budget_tokens,reasoning_source,' +
+    'billing_source,cost_micro_cents,created_at,service,quantity';
 
-// ── Load + cache raw page text ──
-const rawPages = {};
-{
-    const dir = GLib.Dir.open(CACHE_DIR, 0);
-    let name;
-    while ((name = dir.read_name()) !== null) {
-        const m = name.match(/^page-(\d+)\.txt$/);
-        if (!m) continue;
-        const [ok, contents] = GLib.file_get_contents(`${CACHE_DIR}/${name}`);
-        rawPages[parseInt(m[1])] = new TextDecoder().decode(contents);
-    }
-}
-const maxPage = Math.max(...Object.keys(rawPages).map(Number));
-const TOTAL = (maxPage + 1) * 50;
-
-// ── Mock the HTTP layer: page N → parsed cached page, or null beyond cache ──
-let httpCalls = 0;
-P._postGetUsageInfo = function (_session, _ws, _cookie, _sid, page) {
-    httpCalls++;
-    const text = rawPages[page];
-    if (!text) return Promise.resolve(null);
-    return Promise.resolve(this._parseUsageRecords(text));
-};
-
-let updateCount = 0;
-const callbacks = () => ({ onCostDistUpdate: () => { updateCount++; } });
-
-function reset() {
-    httpCalls = 0;
-    updateCount = 0;
-    P.__ws = {};   // clear per-workspace state
+function row(id, model, cost, date, input = 100, output = 50) {
+    return `${id},a@x.com,,,anthropic,${model},${input},${output},0,10,0,0,effort,,,"api",managed-inference,${cost},${date}T10:00:00Z,,1`;
 }
 
-const ws = () => P._wsState(WS);
+const CSV = HEADER + '\n' +
+    row('1', 'claude-sonnet-4-5', 300000000, '2026-09-01') + '\n' +
+    row('2', 'claude-sonnet-4-5', 100000000, '2026-09-02') + '\n' +
+    row('3', 'gpt-5', 200000000, '2026-09-02') + '\n';
 
-// Mirror what fetch() will do: phase 1 → wire token-mix entry → phase 2.
-async function runFlow(costDistMinInterval = 0) {
-    const dist = await P._buildCostDistribution(null, WS, COOKIE, SERVER_ID);
-    if (dist) ws()._tokenMixEntry = P._buildTokenBreakdown(ws()._costDistCache.records);
-    await P._continueCostFetch(null, WS, COOKIE, SERVER_ID, callbacks(), costDistMinInterval);
-    return dist;
-}
+// ── Mock the HTTP layer ──
+let nextResponse = { status: 200, body: CSV };
+P._getCsv = function () { return Promise.resolve(nextResponse); };
 
 function result(ok, msg) {
     print(`  ${ok ? '✓ PASS' : '✗ FAIL'} — ${msg}`);
-    return ok;
+    return !!ok;
 }
 
 let allOk = true;
+const kinds = (res) => (res.entries || []).map(e => e.kind).join(',');
 
 async function main() {
-    print(`GJS flow test — cached pages 0..${maxPage} (${TOTAL} records)\n`);
-
-    // ── TEST 1: cold cache ──
-    print('══ TEST 1: cold cache (first-ever fetch) ══');
-    reset();
-    await runFlow(0);
-    const n1 = ws()._costDistCache.records.length;
-    print(`  records after phase 1+2: ${n1}  (HTTP calls: ${httpCalls})`);
-    print(`  onCostDistUpdate fired: ${updateCount} time(s)`);
-    allOk &= result(n1 === TOTAL && updateCount >= 1,
-        `${n1}/${TOTAL} records, ${updateCount} updates`);
+    // ── TEST 1: full pipeline ──
+    print('══ TEST 1: fetch builds all entries ══');
+    nextResponse = { status: 200, body: CSV };
+    {
+        const res = await P.fetch(null, { apiKey: 'oc_sk_test' });
+        print(`  attempted=${res.attempted} kinds=[${kinds(res)}]`);
+        allOk &= result(res.attempted === true && (res.errors || []).length === 0,
+            'attempted, no errors');
+        const dist = res.entries.find(e => e.name === 'OpenCode Go Cost Dist');
+        const mix = res.entries.find(e => e.name === 'OpenCode Go Token Mix');
+        const stacked = res.entries.find(e => e.kind === 'stackedbarchart');
+        const recent = res.entries.find(e => e.kind === 'barchart');
+        const total = res.entries.find(e => e.kind === 'value');
+        allOk &= result(dist?.segments?.length === 2 && dist.totalCost === 600000000,
+            `cost-dist: 2 models, total 600000000 (got ${dist?.totalCost})`);
+        allOk &= result(dist.segments[0].model === 'claude-sonnet-4-5',
+            `top model first ("${dist?.segments?.[0]?.model}")`);
+        allOk &= result(mix?.segments?.length >= 3, `token-mix types (${mix?.segments?.length})`);
+        allOk &= result(stacked?.buckets?.length === 2, `stacked days (${stacked?.buckets?.length})`);
+        allOk &= result(recent?.bars?.length === 3, `recent bars (${recent?.bars?.length})`);
+        allOk &= result(typeof total?.value === 'string' && total.value.includes('$6.00'),
+            `total value ("${total?.value}")`);
+    }
     print('');
 
-    // ── TEST 2: truncated cache (50) — self-heal ──
-    print('══ TEST 2: truncated cache (50) — must self-heal past 50 ══');
-    reset();
-    ws()._costDistCache = { records: P._parseUsageRecords(rawPages[0]).slice() }; // only page 0
-    await runFlow(0);
-    const n2 = ws()._costDistCache.records.length;
-    print(`  records: ${n2}  (started at 50)`);
-    allOk &= result(n2 === TOTAL, `self-healed ${n2}/${TOTAL}`);
+    // ── TEST 2: legacy cookie account → migration error ──
+    print('══ TEST 2: legacy credentials get migration guidance ══');
+    {
+        const res = await P.fetch(null, { workspaceId: 'wrk_x', authCookie: 'abc' });
+        allOk &= result(res.attempted === true && /service API key/i.test(res.errors?.[0] || ''),
+            `migration error ("${(res.errors?.[0] || '').slice(0, 60)}…")`);
+    }
     print('');
 
-    // ── TEST 3: full cache, no new calls — cheap refresh ──
-    print('══ TEST 3: full cache, no new calls — phase 2 should be cheap ══');
-    reset();
-    const full = [];
-    for (let pg = 0; pg <= maxPage; pg++) full.push(...P._parseUsageRecords(rawPages[pg]));
-    ws()._costDistCache = { records: full };
-    await runFlow(0);
-    const phase2Calls = httpCalls - 1;   // phase 1 = 1 call (page 0)
-    print(`  phase-2 HTTP calls: ${phase2Calls}  (page 1 fully known → caught up)`);
-    allOk &= result(phase2Calls === 1, `${phase2Calls} call(s)`);
+    // ── TEST 3: no credentials → not attempted ──
+    print('══ TEST 3: empty credentials ══');
+    {
+        const res = await P.fetch(null, {});
+        allOk &= result(res.attempted === false, 'attempted=false');
+    }
     print('');
 
-    // ── TEST 4: id present + distribution ──
-    print('══ TEST 4: record shape + cost/token distribution ══');
-    reset();
-    await runFlow(0);
-    const recs = ws()._costDistCache.records;
-    const hasId = recs.every(r => typeof r.id === 'string' && r.id.startsWith('usg_'));
-    const distEntry = ws()._costDistEntry;
-    const tmEntry = ws()._tokenMixEntry;
-    print(`  every record has usg_ id: ${hasId}`);
-    print(`  cost-dist: "${distEntry?.label}", ${distEntry?.segments?.length} model segment(s), total=${distEntry?.totalCost}`);
-    if (distEntry?.segments) for (const s of distEntry.segments)
-        print(`    ${s.model}: ${s.value} ($${(s.value / 1e8).toFixed(4)})`);
-    print(`  token-mix: "${tmEntry?.label}", ${tmEntry?.segments?.length} type(s), total=${tmEntry?.totalCost}`);
-    allOk &= result(hasId && distEntry?.segments?.length >= 1 && tmEntry?.segments?.length >= 1,
-        `id=${hasId}, models=${distEntry?.segments?.length}, token-types=${tmEntry?.segments?.length}`);
-    print('');
+    // ── TEST 4: 401 + header-only ──
+    print('══ TEST 4: HTTP status mapping + empty export ══');
+    {
+        nextResponse = { status: 401, body: '{"error":"unauthorized"}' };
+        const unauth = await P.fetch(null, { apiKey: 'oc_sk_bad' });
+        allOk &= result(/API key/i.test(unauth.errors?.[0] || ''),
+            `401 → key error ("${(unauth.errors?.[0] || '').slice(0, 60)}…")`);
 
-    // ── TEST 5: costDistMinInterval throttle ──
-    print('══ TEST 5: phase 2 throttled when fetched recently ══');
-    reset();
-    await runFlow(0);                 // first run: phase 2 executes, sets lastFullMs
-    const callsAfterFirst = httpCalls;
-    updateCount = 0;
-    await runFlow(3600);              // within 1h window → phase 2 must skip
-    const secondRunCalls = httpCalls - callsAfterFirst;
-    const phase2CallsT5 = secondRunCalls - 1;   // phase 1 always makes 1 call (page 0)
-    print(`  second-run phase-2 calls: ${phase2CallsT5} (expected 0: throttled)`);
-    allOk &= result(phase2CallsT5 === 0, `throttled (${phase2CallsT5} calls)`);
+        nextResponse = { status: 200, body: HEADER + '\n' };
+        const empty = await P.fetch(null, { apiKey: 'oc_sk_test' });
+        allOk &= result(empty.entries?.length === 1 && empty.entries[0].kind === 'value',
+            'header-only CSV → single zero total, no error');
+    }
     print('');
 
     print(allOk ? '══ ALL TESTS PASSED ══' : '══ SOME TESTS FAILED ══');

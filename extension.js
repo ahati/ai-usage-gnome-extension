@@ -567,25 +567,8 @@ const Indicator = GObject.registerClass(
             const accounts = this._getAccounts();
             logger.info('Fetching', accounts.length, 'account(s)');
 
-            // Cost-dist / token-mix refresh floor: at least 1 hour, or the
-            // global refresh interval if the user set it higher.
-            const costDistMinInterval = Math.max(
-                3600,
-                this._settings.get_int('refresh-interval')
-            );
-
             const ps = accounts.map(({ account, provider }) => {
-                // Per-account callback: only re-render when THIS account
-                // is the active tab, so concurrent background updates from
-                // different workspaces don't show each other's stale data.
-                const onBgUpdate = () => {
-                    logger.info('onBackgroundUpdate fired for', account.id, `activeAccountId=${this._activeAccountId}`);
-                    this._renderContent();
-                };
-                return provider.fetch(s, account.credentials, {
-                    onCostDistUpdate: onBgUpdate,
-                    costDistMinInterval,
-                }).then(r => {
+                return provider.fetch(s, account.credentials).then(r => {
                     this._results[account.id] = r;
                     logger.info(`${account.label}:`, `attempted=${r.attempted} entries=${r.entries?.length || 0} errors=${r.errors?.length || 0}`);
                 }).catch(e => {

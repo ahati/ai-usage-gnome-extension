@@ -34,7 +34,7 @@ gnome-extensions enable ai-usage-monitor@ahati
 2. Open **Preferences** → **Accounts** tab
 3. Click **Add Account**, choose a provider, and enter credentials:
    - **Z.AI**: API key (from [z.ai/manage-apikey](https://z.ai/manage-apikey)) or OAuth login
-   - **OpenCode Go**: Workspace ID + auth cookie (from browser DevTools)
+   - **OpenCode**: Service API key (`oc_sk_...` from Console) — official Usage API CSV export
    - **OpenAI**: OAuth access token
    - **DeepSeek**: API key (from [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys))
 4. The panel updates automatically
@@ -56,7 +56,7 @@ Account credentials are stored in `~/.local/share/.ai-usage-ext/config.json`.
 | Provider | Auth | Data |
 |----------|------|------|
 | Z.AI | API key / OAuth | Token & time usage limits |
-| OpenCode Go | Workspace ID + cookie | Rolling/weekly/monthly usage |
+| OpenCode Go | Service API key | 30d cost/token/model usage (CSV export) |
 | OpenAI | OAuth token | Usage windows + credits |
 | DeepSeek | API key | Account balance |
 

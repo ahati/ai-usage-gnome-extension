@@ -1,70 +1,82 @@
 #!/usr/bin/env gjs
-/* gjs-parse-test.js — Validate the REAL _parseUsageRecords under GJS.
+/* gjs-parse-test.js — Validate the Usage API CSV parser under GJS.
  *
- * Imports the actual parser from providers/opencode-go.js (no copy, so it
- * can't drift). Asserts each page yields 50 records with unique usg_ ids
- * and intact token fields. GJS uses SpiderMonkey (not V8) — this confirms
- * the regex behaves identically to Node.
+ * Imports the real _parseCsv from providers/opencode-go.js (no copy, so it
+ * can't drift). Covers: quoted commas/newlines, web-search rows (blank
+ * model), header-only file, and numeric coercion. GJS uses SpiderMonkey
+ * (not V8) — this confirms the parser behaves identically to Node.
  *
  * Usage:  gjs -m gjs-parse-test.js   (from project root)
  */
-import GLib from 'gi://GLib';
-import { opencodeGoProvider } from './providers/opencode-go.js';
+import { opencodeGoProvider as P } from './providers/opencode-go.js';
 
-const CACHE_DIR = '/tmp/opencode-go-usage_data';
+const HEADER = 'id,user_email,service_account_name,app,provider,model,' +
+    'input_tokens,output_tokens,reasoning_tokens,cache_read_tokens,' +
+    'cache_write_5m_tokens,cache_write_1h_tokens,reasoning_mode,' +
+    'reasoning_effort,reasoning_budget_tokens,reasoning_source,' +
+    'billing_source,cost_micro_cents,created_at,service,quantity';
 
-// Use the production parser directly.
-const _parseUsageRecords = (text) => opencodeGoProvider._parseUsageRecords(text);
-
-function readFile(path) {
-    const [ok, contents] = GLib.file_get_contents(path);
-    if (!ok) throw new Error(`Could not read ${path}`);
-    return new TextDecoder().decode(contents);
+function result(ok, msg) {
+    print(`  ${ok ? '✓ PASS' : '✗ FAIL'} — ${msg}`);
+    return !!ok;
 }
 
-function main() {
-    const dir = GLib.Dir.open(CACHE_DIR, 0);
-    const files = [];
-    let name;
-    while ((name = dir.read_name()) !== null) {
-        if (/^page-\d+\.txt$/.test(name)) files.push(name);
-    }
-    files.sort((a, b) => parseInt(a.match(/\d+/)[0]) - parseInt(b.match(/\d+/)[0]));
+let allOk = true;
 
-    print(`GJS ${GLib.get_os_info('PRETTY_NAME') || ''} — testing ${files.length} cached pages`);
-    print('');
-
-    let total = 0;
-    let allOk = true;
-    const allIds = new Set();
-    let dupIds = 0;
-    for (const file of files) {
-        const text = readFile(`${CACHE_DIR}/${file}`);
-        const records = _parseUsageRecords(text);
-        const n = records ? records.length : 0;
-        total += n;
-
-        // Verify id present + unique + token fields parsed.
-        let idOk = true;
-        let tokenSum = 0;
-        if (records) for (const r of records) {
-            if (typeof r.id !== 'string' || !r.id.startsWith('usg_')) idOk = false;
-            if (allIds.has(r.id)) dupIds++;
-            else allIds.add(r.id);
-            tokenSum += r.inputTokens + r.outputTokens + r.cacheReadTokens;
-        }
-
-        const ok = n === 50 && idOk;
-        if (!ok) allOk = false;
-        print(`  ${file}: ${String(n).padStart(2)} records  ids=${idOk ? '✓' : '✗'}  tokens(i+o+cr)=${tokenSum}  ${ok ? '✓' : '✗ EXPECTED 50 usg_ ids'}`);
-    }
-
-    print('');
-    print(`Total records parsed in GJS: ${total}  (expected ${(files.length) * 50})`);
-    print(`Distinct ids: ${allIds.size}  duplicate ids across pages: ${dupIds}`);
-    if (dupIds > 0) allOk = false;
-    print(allOk ? 'RESULT: ✓ parser works correctly under GJS (id unique, fields intact)'
-               : 'RESULT: ✗ GJS PARSING BUG — records lost or ids missing/duplicate');
+// ── TEST 1: basic rows + web-search row ──
+print('══ TEST 1: inference + web-search rows ══');
+{
+    const csv = HEADER + '\n' +
+        '101,alice@example.com,,opencode,anthropic,claude-sonnet-4-5,1000,200,50,300,0,0,effort,,,"api",managed-inference,374228,2026-09-01T10:00:00Z,,1\n' +
+        'service:9,,,,,,,,,,,,,,,,,0,2026-09-01T11:00:00Z,web-search,2\n';
+    const recs = P._parseCsv(csv);
+    print(`  records: ${recs.length}`);
+    const r0 = recs[0] || {};
+    const r1 = recs[1] || {};
+    allOk &= result(recs.length === 2, `2 records (got ${recs.length})`);
+    allOk &= result(r0.model === 'claude-sonnet-4-5' && r0.cost === 374228 &&
+        r0.inputTokens === 1000 && r0.timeMs > 0 && r0.date === '2026-09-01',
+        'inference row fields intact');
+    allOk &= result(r1.model === '' && r1.service === 'web-search' && r1.cost === 0,
+        'web-search row: blank model, service set');
+    allOk &= result(P._modelKey(r1) === 'web-search', 'web-search display key');
 }
+print('');
 
-main();
+// ── TEST 2: quoted commas / quotes / newlines ──
+print('══ TEST 2: RFC-4180 quoting ══');
+{
+    const csv = HEADER + '\n' +
+        '102,bob@example.com,,"my, app",openai,"gpt-4o, mini",10,20,0,0,0,0,disabled,,,"ui",credit,5000,2026-09-02T00:00:00Z,,1\n' +
+        '103,carol@example.com,,"line1\nline2",deepseek,deepseek-chat,1,1,0,0,0,0,disabled,,,"api",byok,0,2026-09-02T01:00:00Z,,1\n';
+    const recs = P._parseCsv(csv);
+    allOk &= result(recs.length === 2, `2 records (got ${recs.length})`);
+    allOk &= result(recs[0]?.model === 'gpt-4o, mini', `quoted comma in model ("${recs[0]?.model}")`);
+    allOk &= result(recs[1]?.model === 'deepseek-chat', 'quoted newline inside other field');
+}
+print('');
+
+// ── TEST 3: header-only + empty ──
+print('══ TEST 3: header-only / empty files ══');
+{
+    const headerOnly = P._parseCsv(HEADER + '\n');
+    const empty = P._parseCsv('');
+    allOk &= result(Array.isArray(headerOnly) && headerOnly.length === 0, 'header-only → 0 rows');
+    allOk &= result(Array.isArray(empty) && empty.length === 0, 'empty → 0 rows');
+}
+print('');
+
+// ── TEST 4: column order independence + bad numbers ──
+print('══ TEST 4: shuffled columns, blank numerics ══');
+{
+    const csv = 'model,cost_micro_cents,created_at,input_tokens,id\n' +
+        'kimi-k2,abc,2026-09-03T05:00:00Z,,xyz-1\n';
+    const recs = P._parseCsv(csv);
+    allOk &= result(recs.length === 1, `1 record (got ${recs.length})`);
+    allOk &= result(recs[0]?.cost === 0 && recs[0]?.inputTokens === 0,
+        'non-numeric / blank numerics coerce to 0');
+    allOk &= result(recs[0]?.date === '2026-09-03', 'date sliced from created_at');
+}
+print('');
+
+print(allOk ? '══ ALL TESTS PASSED ══' : '══ SOME TESTS FAILED ══');
