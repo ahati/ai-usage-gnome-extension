@@ -21,47 +21,30 @@ gnome-shell --help 2>&1 | grep devkit
 # 1. Install the extension
 ./install.sh
 
-# 2. Launch nested shell in a terminal window
-dbus-run-session gnome-shell --devkit --wayland
+# 2. Launch nested shell in a terminal window (one private D-Bus session,
+#    enables the extension automatically; logs to stdout)
+#    Easiest: dbus-run-session bash launch-nested.sh
+#    Manual:  dbus-run-session gnome-shell --devkit --wayland
+#             (then, in another terminal on the same session:)
+#             gnome-extensions enable ai-usage-monitor@ahati
 
-# 3. In another terminal, enable the extension inside the nested session
-gnome-extensions enable ai-usage-monitor@ahati
+# 3. Test — click the panel indicator, check menu, verify data
 
-# 4. Test — click the panel indicator, check menu, verify data
+# 4. Make code changes to extension.js / providers/*.js
 
-# 5. Make code changes to extension.js / providers/*.js
+# 5. Re-install and restart nested shell
+./dev-reload.sh   # fast reinstall (same files as install.sh)
+# Close nested shell window and relaunch, then re-enable the extension
 
-# 6. Re-install and restart nested shell
-./install.sh
-# Close nested shell window and relaunch dbus-run-session gnome-shell --devkit --wayland
-gnome-extensions enable ai-usage-monitor@ahati
-
-# 7. Repeat from step 4
+# 6. Repeat from step 3
 ```
 
 ## 3. One-liner reload script
 
-Save as `dev-reload.sh`:
-
-```bash
-#!/bin/bash
-# Reload extension in nested shell — run from project root
-UUID="ai-usage-monitor@ahati"
-EXT_DIR="${HOME}/.local/share/gnome-shell/extensions/${UUID}"
-
-set -e
-rm -rf "${EXT_DIR}"
-mkdir -p "${EXT_DIR}/schemas" "${EXT_DIR}/providers"
-cp extension.js prefs.js stylesheet.css metadata.json "${EXT_DIR}/"
-cp providers/*.js "${EXT_DIR}/providers/"
-cp schemas/*.xml "${EXT_DIR}/schemas/"
-cp -r media "${EXT_DIR}/" 2>/dev/null || true
-glib-compile-schemas "${EXT_DIR}/schemas/"
-chmod 664 "${EXT_DIR}/"*.{js,css,json} "${EXT_DIR}/providers/"*.js "${EXT_DIR}/schemas/"*
-
-echo "Installed. Restart nested shell or run:"
-echo "  gnome-extensions enable ${UUID}"
-```
+The checked-in `dev-reload.sh` reinstalls the same file set as `install.sh`
+(extension + charting + providers + media, schema compiled) without
+wiping first — use it for fast iteration. Both leave repo-only helpers
+(`gjs-*-test.js`, `launch-nested.sh`) out of the installed tree.
 
 Usage:
 
@@ -130,10 +113,14 @@ API_KEY=$(gsettings get org.gnome.shell.extensions.ai-usage zai-api-key | tr -d 
 curl -s -H "Authorization: Bearer $API_KEY" \
     "https://api.z.ai/api/monitor/usage/quota/limit" | python3 -m json.tool
 
-# Test DeepSeek API
-DS_KEY=$(gsettings get org.gnome.shell.extensions.ai-usage deepseek-api-key | tr -d "'")
-curl -s -H "Authorization: Bearer $DS_KEY" \
-    "https://api.deepseek.com/user/balance" | python3 -m json.tool
+# Test OpenCode Console APIs (service key from the JSON config — never echo it)
+OC_KEY=$(python3 -c "import json;print([a['credentials']['apiKey'] for a in json.load(open('$HOME/.local/share/.ai-usage-ext/config.json'))['accounts'] if a['provider']=='opencode-go'][0])")
+BASE="https://opencode.ai/console"
+for ep in "api/go/status" "api/usage/summary?range=30d" "api/usage/models?range=30d" "api/usage/cost-by-day?range=30d" "api/usage/rows?range=24h" "api/v1/usage/export?scope=organization&range=7d"; do
+    echo "=== GET $ep ==="
+    curl -sk -m 25 "$BASE/$ep" -H "Authorization: Bearer $OC_KEY" -H "Accept: application/json,text/csv" | head -c 400; echo
+done
+unset OC_KEY
 ```
 
 ### 4e. Check GSettings
@@ -141,16 +128,16 @@ curl -s -H "Authorization: Bearer $DS_KEY" \
 ```bash
 SCHEMA="org.gnome.shell.extensions.ai-usage"
 
-# List all keys and values
+# List all UI keys and values (display mode, thresholds, refresh, log level)
 gsettings list-recursively "$SCHEMA"
 
-# Check specific keys
-gsettings get "$SCHEMA" enabled-providers
-gsettings get "$SCHEMA" zai-api-key
-gsettings get "$SCHEMA" deepseek-api-key
-gsettings get "$SCHEMA" opencode-go-workspace-id
+# Account credentials live in JSON, NOT gsettings:
+#   ~/.local/share/.ai-usage-ext/config.json
+# Redacted overview (never print secrets):
+python3 -c "import json; [print(a.get('label'), '|', a.get('provider'), '|', a.get('enabled'), '|', {k: ('<set>' if v else '<empty>') for k, v in a.get('credentials', {}).items()}) for a in json.load(open('$HOME/.local/share/.ai-usage-ext/config.json'))['accounts']]"
 
-# Set a key
+# Set a UI key
+```
 gsettings set "$SCHEMA" refresh-interval 60
 ```
 
@@ -183,41 +170,43 @@ for key in ['name', 'state', 'enabled', 'error']:
 
 ## 5. Provider debugging
 
-### Check which providers are enabled
+### Check accounts and redacted credential status
 
 ```bash
-gsettings get org.gnome.shell.extensions.ai-usage enabled-providers
+python3 -c "import json; [print(a.get('label'), '|', a.get('provider'), '|', {k: ('<set>' if v else '<empty>') for k, v in a.get('credentials', {}).items()}) for a in json.load(open('$HOME/.local/share/.ai-usage-ext/config.json'))['accounts']]"
 ```
 
-### Check if a provider has auth configured
+### Run the GJS unit tests (no credentials needed — HTTP layer is mocked)
 
 ```bash
-SCHEMA="org.gnome.shell.extensions.ai-usage"
-for key in zai-api-key opencode-go-workspace-id openai-oauth-token deepseek-api-key; do
-    VAL=$(gsettings get "$SCHEMA" "$key")
-    if [ "$VAL" = "''" ] || [ -z "$VAL" ]; then
-        echo "$key: NOT CONFIGURED"
-    else
-        echo "$key: configured (${VAL:0:16}...)"
-    fi
-done
+gjs -m gjs-parse-test.js   # CSV parser: quoting, web-search rows, header-only
+gjs -m gjs-flow-test.js    # provider pipeline: JSON costs, fallbacks, migration error
 ```
 
-### Test a provider in isolation
+### Test the live OpenCode provider (real credentials, aggregates only)
 
 ```bash
-gjs -m -c "
-import { zaiProvider } from './providers/zai.js';
-const Gio = imports.gi.Gio;
-const Soup = imports.gi.Soup;
-const schema = Gio.SettingsSchemaSource.get_default()
-    .lookup('org.gnome.shell.extensions.ai-usage', true);
-const settings = new Gio.Settings({settings_schema: schema});
-const session = new Soup.Session();
-const result = await zaiProvider.fetch(session, settings);
-print(JSON.stringify(result, null, 2));
-"
+cat > /tmp/oc-live.js << 'EOF'
+import GLib from 'gi://GLib';
+import Soup from 'gi://Soup?version=3.0';
+import * as config from './config.js';
+import { opencodeGoProvider as P } from './providers/opencode-go.js';
+async function main() {
+    const s = new Soup.Session();
+    const acc = config.load().accounts.find(a => a.provider === 'opencode-go' && a.enabled);
+    const r = await P.fetch(s, acc.credentials);
+    print(JSON.stringify({ attempted: r.attempted,
+        entries: r.entries.map(e => ({ kind: e.kind, label: e.label })),
+        errors: r.errors }, null, 1));
+}
+const loop = new GLib.MainLoop(null, false);
+main().finally(() => loop.quit());
+loop.run();
+EOF
+cp /tmp/oc-live.js ./oc-live-tmp.js && gjs -m oc-live-tmp.js; rm -f ./oc-live-tmp.js
 ```
+# NOTE: plain gjs needs an explicit GLib.MainLoop for real network I/O;
+# inside gnome-shell a main loop always runs.
 
 ## 6. Common issues
 
@@ -227,25 +216,35 @@ print(JSON.stringify(result, null, 2));
 | Extension not in `gnome-extensions list` | Shell hasn't discovered it | Restart nested shell; on main session log out/in |
 | `No property X on StWidget` | Using invalid St constructor options | Check GNOME Shell St API docs; avoid `style`, `spacing`, percentage widths |
 | `Tried to construct object without a GType` | Subclassing GObject without registration | Don't subclass GObject classes; use composition instead |
-| Provider returns `attempted: false` | Auth not configured | Check `needsAuth()` conditions; verify gsettings keys |
-| Extension loads but menu empty | `_rebuildMenu` logic bug or fetch silently failed | Add `log()` calls; check journal for `[ai-usage]` prefix |
-| OpenCode Go returns 302/auth page | Cookie expired | Refresh cookie from browser DevTools → Cookies |
+| Provider returns `attempted: false` | No credentials set | Add the key in Preferences → Accounts, or check the JSON config |
+| Extension loads but menu empty | Fetch failed or no enabled accounts | Add `log()` calls; check journal for `[ai-usage]` prefix |
+| OpenCode: 401 errors | Service key missing/invalid/expired/revoked | Create a new service key in Console → Preferences → Accounts |
+| OpenCode: 403 errors | Service account may not read usage | Check the key's permissions in Console |
+| OpenCode shows migration error | Pre-Usage-API account (workspace ID + cookie) | Paste the service API key (`oc_sk_...`) into the account |
+| OpenCode quota bars missing | Non-Go workspace (no `access.meters`) | Expected — cost/token charts still work |
 | Panel icon not visible | Widget sizing/visibility issue | Use simple `St.Label` instead of `St.Widget` bars |
 
 ## 7. File layout for debugging
 
 ```
 ~/.local/share/gnome-shell/extensions/ai-usage-monitor@ahati/
-├── extension.js          ← Main extension logic
-├── prefs.js              ← Preferences dialog
+├── extension.js          ← Main extension logic (panel, menu, fetching)
+├── prefs.js              ← Preferences dialog (accounts page = JSON config)
+├── charting.js           ← Cairo bar / stacked / distribution charts
+├── logger.js             ← Level-gated journal logging
+├── config.js             ← JSON account store (~/.local/share/.ai-usage-ext/)
 ├── stylesheet.css        ← Panel/menu styling
 ├── metadata.json         ← UUID, version, shell-version
 ├── providers/
 │   ├── zai.js            ← Z.AI API (api.z.ai)
-│   ├── opencode-go.js    ← OpenCode Go _server API
+│   ├── opencode-go.js    ← OpenCode Console usage + logs + go-status APIs
 │   ├── openai.js         ← ChatGPT usage API
-│   └── deepseek.js       ← DeepSeek balance API
+│   ├── deepseek.js       ← DeepSeek balance API
+│   └── peak.js / utils.js / colors.js / constants.js  ← shared helpers
 └── schemas/
     ├── org.gnome.shell.extensions.ai-usage.gschema.xml
     └── gschemas.compiled
 ```
+
+Repo-only helpers (not installed): `gjs-parse-test.js`, `gjs-flow-test.js`
+(GJS unit tests), `install.sh`, `dev-reload.sh`, `launch-nested.sh`.
