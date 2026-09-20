@@ -25,7 +25,7 @@ import Soup from 'gi://Soup?version=3.0';
 import GLib from 'gi://GLib';
 import { modelColor } from './colors.js';
 import { USER_AGENT } from './constants.js';
-import { fmtCost, fmtNum, xLabelShort } from './utils.js';
+import { clamp, fmtCost, fmtNum, xLabelShort } from './utils.js';
 import * as logger from '../logger.js';
 
 const DEFAULT_CONSOLE_URL = 'https://opencode.ai/console';
@@ -121,12 +121,51 @@ export const opencodeGoProvider = {
         if (daily) entries.push(daily);
         if (recent) entries.push(recent);
 
+        // Quota bars (5h / weekly / monthly) are best-effort: only Go
+        // workspaces expose access.meters; they render at the top.
+        try {
+            const status = await this._getJson(session, `${base}/api/go/status`, apiKey, 'go-status');
+            entries.unshift(...this._buildQuotaEntries(status));
+        } catch (e) {
+            logger.warn('OpenCode go-status failed, skipping quota bars:', e.message || e);
+        }
+
         if (entries.length === 0) {
             throw new Error('empty JSON usage response');
         }
         logger.info('OpenCode Usage API (JSON):',
             `${summary.totalRequests} requests, ${fmtCost(this._num(summary.totalCostMicroCents))}`);
         return { attempted: true, entries, errors: [] };
+    },
+
+    /* Quota percent bars from the Go subscription meters
+     * (access.meters.{fiveHour,week,month} with limit/used microcents).
+     * Same entry shape as the old dashboard bars, so they render at the
+     * top and drive the panel traffic-light again. Missing meters (non-Go
+     * workspaces) are skipped; the month meter carries no reset timestamp. */
+    _buildQuotaEntries(statusData) {
+        const meters = statusData?.access?.meters;
+        if (!meters) return [];
+        const defs = [
+            { key: 'fiveHour', name: 'OpenCode Go 5h', label: '5h:' },
+            { key: 'week', name: 'OpenCode Go Weekly', label: 'Weekly:' },
+            { key: 'month', name: 'OpenCode Go Monthly', label: 'Monthly:' },
+        ];
+        const out = [];
+        for (const d of defs) {
+            const m = meters[d.key];
+            if (!m) continue;
+            const limit = this._num(m.limitMicroCents);
+            if (limit <= 0) continue;
+            const pctUsed = clamp(this._num(m.usedMicroCents) / limit * 100);
+            out.push({
+                kind: 'percent', name: d.name, group: 'OpenCode Go',
+                label: d.label, percentUsed: pctUsed,
+                percentRemaining: clamp(100 - pctUsed),
+                resetTimeIso: m.resetsAt || null,
+            });
+        }
+        return out;
     },
 
     /* GET a JSON usage endpoint. Throws on transport errors, non-200
